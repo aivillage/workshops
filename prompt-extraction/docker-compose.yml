@@ -1,0 +1,34 @@
+services:
+  # Equivalent to: prompt-extraction-user (Pod/Service)
+  prompt-extraction-user:
+    build:
+      context: ./user
+    image: workshop-prompt-extraction-user:local
+    ports:
+      - "30060:5000"
+    environment:
+      - SERVICE_URL=http://prompt-extraction-service:5000
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # Equivalent to: prompt-extraction-service (Deployment/Service)
+  prompt-extraction-service:
+    build:
+      context: ./service
+    image: workshop-prompt-extraction-service:local
+    environment:
+      - VLLM_URL=http://llm-services.local/v1/chat/completions
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M

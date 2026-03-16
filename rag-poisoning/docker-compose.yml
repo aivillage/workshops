@@ -1,0 +1,34 @@
+services:
+  # Equivalent to: rag-poisoning-user (Pod/Service)
+  rag-poisoning-user:
+    build:
+      context: ./user
+    image: workshop-rag-poisoning-user:local
+    ports:
+      - "30070:5000"
+    environment:
+      - SERVICE_URL=http://rag-poisoning-service:5000
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # Equivalent to: rag-poisoning-service (Deployment/Service)
+  rag-poisoning-service:
+    build:
+      context: ./service
+    image: workshop-rag-poisoning-service:local
+    environment:
+      - VLLM_URL=http://llm-services.local/v1/chat/completions
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
