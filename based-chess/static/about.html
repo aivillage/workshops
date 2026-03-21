@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - based</title>
+    <link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body>
+    <div class="container">
+        <div id="game-layout-container" style="display: flex; flex-direction: column; align-items: center; width: 100%; gap: 20px;">
+            <div id="game-left-panel" style="width: 100%; max-width: min(640px, 94vw, calc(100vw - 32px));">
+                <div id="spectator-controls" style="display: flex; margin-bottom: 10px; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                    <button id="back-to-lobby-btn" class="btn btn-secondary" onclick="window.location.href='/'">Back to Lobby</button>
+                </div>
+
+                <div style="background: linear-gradient(135deg, #f7f9ff 0%, #ffffff 40%, #f8f5ff 100%); border-radius: 10px; padding: 18px 16px 20px; box-shadow: 0 3px 8px rgba(0,0,0,0.06); font-size: 0.9em; line-height: 1.6; color: #222;">
+                    <h2 style="margin-top: 0; margin-bottom: 4px; font-size: 1.35em; color: #222;">About based.mobi</h2>
+                    <p style="margin: 0 0 14px; font-size: 0.85em; color: #666;">A small, opinionated chess server focused on clean games, clear rules, and fast connections.</p>
+
+                    <p style="margin-bottom: 10px;">
+                        based.mobi is a real-time multiplayer chess server focused on simple, fast matchmaking and a clean playing experience.
+                        Games are managed entirely in memory on the server, and the UI is a lightweight static client served alongside the engine.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">How it works</h3>
+                    <p style="margin-bottom: 8px;">
+                        The backend is written in Rust using <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">axum</code> and <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">tokio</code>. Each connected browser opens a WebSocket
+                        to the server. All game actions – joining rooms, making moves, offering draws, requesting rematches – are sent as small
+                        JSON messages over this WebSocket.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        Here's what happens when you make a move: you click a square on the board, the browser packages your move in a JSON message
+                        (like <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">{"type": "make_move", "move": "e2e4"}</code>), and sends it over the WebSocket. The server receives this,
+                        validates the move using the <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">shakmaty</code> library to ensure it's legal, updates the game state, and then
+                        broadcasts the updated game state to all participants (both players and spectators). Your browser receives this update and
+                        re-renders the board, move history, and timers. This entire cycle typically completes in milliseconds.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        The server keeps track of active games, rooms, players, spectators and timers. When anything changes in a game, the server
+                        pushes an updated game state to all participants (both players and spectators) so that every client stays in sync. If you
+                        refresh the page or briefly lose connection, the WebSocket reconnects and you can request the current game state to catch up.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        There is deliberately no persistent database on the server: when a game ends and the process eventually restarts, all
+                        in-memory state is discarded. Long-term storage happens only in your browser (see below).
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Chess rules and engine</h3>
+                    <p style="margin-bottom: 8px;">
+                        All chess rules are enforced on the server using the Rust <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">shakmaty</code> library:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li>Legal move generation for all pieces</li>
+                        <li>Castling, en passant and promotions</li>
+                        <li>Check, checkmate, stalemate and insufficient material</li>
+                        <li>Threefold repetition and the fifty-move rule (claimable)</li>
+                        <li>The automatic seventy-five-move rule for draws</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        The draw rules work as follows: players can claim a draw after threefold repetition (the same position occurs three times) or
+                        after fifty moves without a pawn move or capture. However, if the game reaches seventy-five moves without a pawn move or capture,
+                        the draw is automatic – no claim needed. This matches FIDE regulations where the seventy-five-move rule is mandatory and cannot
+                        be waived.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        For analysis and bot play, the frontend runs a WebAssembly build of Stockfish entirely in your browser
+                        (compiled from the <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">stockfish.wasm</code> project by Niklas Fiekas). This is the same Stockfish engine used in
+                        professional chess software, but compiled to run in your browser using WebAssembly. The engine runs at full strength locally
+                        on your device – no moves or analysis are sent to any external engine server.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        When you enable analysis or play against the bot, the server only ever sees the same game messages as in a normal game
+                        (moves, draw offers, rematch requests). Engine evaluations, best-move suggestions and annotations never leave your browser.
+                        The bot difficulty is controlled by Stockfish's skill level parameter (1-20, default 10), which adjusts the engine's playing
+                        strength. For move analysis, the engine searches to a depth of 8-12 plies depending on the context, balancing accuracy with
+                        speed so analysis completes quickly.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Time controls and FIDE-style timing</h3>
+                    <p style="margin-bottom: 8px;">
+                        The server maintains the authoritative clocks for each game. Time is tracked in seconds and updated from a background task
+                        that runs every 2 seconds. After every move, the server subtracts the elapsed time for the player who just moved and then
+                        applies the increment (the bonus time added after each move).
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        The presets are designed to mirror common FIDE-style controls:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li><strong>Bullet: 2+1</strong> – Online convention, not FIDE-rated but popular for fast games</li>
+                        <li><strong>Blitz: 3+2</strong> – Standard FIDE blitz time control (3 minutes + 2 seconds per move)</li>
+                        <li><strong>Rapid: 15+10</strong> – Standard FIDE rapid time control (15 minutes + 10 seconds per move)</li>
+                        <li><strong>Classical: 60+30</strong> – Eligible as FIDE standard time control (60 minutes + 30 seconds per move). Under current FIDE regulations, 45+30 or longer qualifies for standard rating.</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        The browser displays a smooth countdown based on the last time update from the server, but the server is always the source
+                        of truth for flagging and game results. If your clock hits zero on the server, you lose on time – unless your opponent has
+                        insufficient mating material, in which case the game is drawn even if you flagged.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Persistence, replay and analysis</h3>
+                    <p style="margin-bottom: 8px;">
+                        <strong>Important: The only place games live long-term is your browser.</strong> The server never stores them on disk or in any database.
+                        All game state exists only in memory while players are connected. If the server process restarts, all active games vanish from the server,
+                        but your local history remains untouched in your browser.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        Completed games are saved in your browser's <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">localStorage</code> (up to 100 games, with the oldest automatically
+                        removed when the limit is reached). Each entry stores:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li>Move history in UCI and SAN notation</li>
+                        <li>FEN snapshots for each move (allowing you to step through the game)</li>
+                        <li>Final result and result reason (checkmate, timeout, draw by agreement, etc.)</li>
+                        <li>PGN (including headers with player names, date, time control, and result)</li>
+                        <li>Stockfish evaluation and move-quality annotations when available (best moves, mistakes, blunders)</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        The replay page loads these saved games locally, reconstructs the positions, and can run fresh Stockfish analysis in your
+                        browser so you can step through the game with engine guidance. You can download the PGN for any saved game to import into
+                        chess databases or analysis software.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        Because games are only persisted client-side, clearing your browser storage or using a different device will clear or
+                        isolate your history. The server never writes your moves to disk. This design choice prioritizes privacy and simplicity:
+                        there's no central archive of your games, no user accounts, no email addresses, and no personal data stored anywhere.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">FIDE compliance goals</h3>
+                    <p style="margin-bottom: 8px;">
+                        This site aims to follow the FIDE Laws of Chess for move legality, game results and timing:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li>Legal move generation and validation for every move</li>
+                        <li>Correct handling of checkmate, stalemate and insufficient material</li>
+                        <li>Threefold repetition and fifty-move rule (player-claimable)</li>
+                        <li>Automatic seventy-five-move rule for draws</li>
+                        <li>Standard-style time controls with increments, including 60+30</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        However, this is intentionally not a full tournament management system. It does not include:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li>Rating server or ELO calculations</li>
+                        <li>Pairing systems (Swiss, round-robin, etc.)</li>
+                        <li>Arbiter tools or dispute resolution</li>
+                        <li>PGN signing or anti-cheat measures</li>
+                        <li>Tournament brackets or standings</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        The goal is faithful rules and timings compatible with FIDE-standard play, not full tournament infrastructure. The 60+30
+                        classical preset in particular is suitable for standard games under current FIDE regulations (as of 2026, FIDE accepts
+                        45+30 or longer as standard time controls).
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Security & privacy</h3>
+                    <p style="margin-bottom: 8px;">
+                        <strong>No tracking, no analytics, no cookies.</strong> The core game client contains no third-party analytics scripts,
+                        no tracking pixels, and no cookies beyond what your browser uses for localStorage. The only data transmitted to the server
+                        is the WebSocket messages necessary for gameplay (moves, draw offers, room joins, etc.).
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        The server does not log moves, store game history, or maintain any persistent records of players. There are no user accounts,
+                        so there's no email addresses, passwords, or personal information collected. Your identity is ephemeral – tied only to your current
+                        WebSocket session. When you disconnect, that identity is forgotten.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        All communication happens over HTTPS (or HTTP in local development). The WebSocket connection is encrypted in transit, and
+                        the server uses security headers (COOP/COEP) required for SharedArrayBuffer support, which also helps prevent certain
+                        cross-origin attacks.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Browser & device support</h3>
+                    <p style="margin-bottom: 8px;">
+                        The basic game (playing, spectating, matchmaking) works in any modern browser. However, some features require additional
+                        browser capabilities:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li><strong>Stockfish analysis and bot play</strong> require <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">SharedArrayBuffer</code> support, which is only available in secure contexts (HTTPS)
+                            and requires specific security headers from the server. Chrome, Firefox, and Edge support this on HTTPS. Safari 15.2+ supports
+                            it with the proper headers (COOP: same-origin, COEP: require-corp).</li>
+                        <li><strong>WebAssembly</strong> is required for Stockfish. All modern browsers support WebAssembly, but older versions may not.</li>
+                        <li><strong>WebSocket</strong> support is required for real-time gameplay. This is available in all modern browsers.</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        If your browser doesn't support SharedArrayBuffer (or you're on HTTP instead of HTTPS), you can still play games, spectate,
+                        and use all core features – you just won't be able to enable analysis or play against the bot. The site will detect this
+                        and disable those options automatically.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        The site is designed to be readable and usable on small mobile devices (including small iPhones). The layout adapts to screen
+                        size, and touch interactions work for moving pieces and using controls.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Limitations & philosophy</h3>
+                    <p style="margin-bottom: 8px;">
+                        This server is intentionally minimal and opinionated. Some features you might expect from other chess sites are deliberately
+                        absent:
+                    </p>
+                    <ul style="margin: 0 0 8px 18px; padding: 0;">
+                        <li><strong>No rating system</strong> – There's no ELO, no leaderboards, no rankings. This keeps the focus on playing chess
+                            rather than grinding for points. Games are just games.</li>
+                        <li><strong>No chat or social features</strong> – There's no in-game chat, no friend lists, no profiles. This eliminates
+                            moderation overhead and keeps the experience focused on chess.</li>
+                        <li><strong>No accounts</strong> – You don't sign up, log in, or create a profile. Your identity is per-session. This means
+                            no password resets, no email verification, and no account recovery – but also no data breaches, no spam, and no
+                            personal information at risk.</li>
+                        <li><strong>No persistent game history on server</strong> – Games only exist in memory while active, and in your browser
+                            after completion. This means no global archive, but also no privacy concerns about your games being stored indefinitely.</li>
+                    </ul>
+                    <p style="margin-bottom: 8px;">
+                        The philosophy is simple: fast matchmaking, clean rules, minimal friction. If you want ratings, chat, or persistent accounts,
+                        there are other sites for that. This one is for playing chess.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Deployment and architecture</h3>
+                    <p style="margin-bottom: 8px;">
+                        The server is a single Rust binary that serves static assets from the <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">/static</code> directory and exposes one WebSocket
+                        endpoint at <code style="background: rgba(0,123,255,0.1); padding: 2px 4px; border-radius: 3px;">/ws</code>. It is intended to run behind a simple reverse proxy on a single host, with no external
+                        dependencies other than the OS and a TCP listener. There's no database, no Redis, no message queue – just the binary and
+                        the static files.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        All third-party JavaScript (chess.js for move validation on the client, Stockfish for analysis) is self-hosted. This ensures
+                        reliability (no dependency on external CDNs), privacy (no requests to third-party domains), and compatibility with the
+                        COEP: require-corp header needed for SharedArrayBuffer support.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        The server is designed for single-region deployment. If you're far from the server, you'll experience higher latency in
+                        move transmission, but the game will still function correctly. For global low-latency play, you'd need multiple regional
+                        deployments, which is beyond the scope of this minimal setup.
+                    </p>
+                    <p style="margin-bottom: 0;">
+                        All communication between your browser and the server happens over HTTPS (or HTTP in local development) and a single
+                        WebSocket connection. There is no third-party analytics or tracking embedded in the core game client.
+                    </p>
+
+                    <h3 style="margin-top: 18px; margin-bottom: 8px; font-size: 1.05em; color: #333;">Frequently asked questions</h3>
+                    <p style="margin-bottom: 8px;">
+                        <strong>Is my data stored on your servers?</strong><br>
+                        No. Games only exist in server memory while players are connected. When a game ends, it's gone from the server. The only
+                        long-term storage is in your browser's localStorage, which you control.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        <strong>Can I export my games?</strong><br>
+                        Yes. Every saved game includes a PGN that you can download from the replay page. You can import these into chess databases,
+                        analysis software, or share them with others.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        <strong>Is the engine cheating for my opponent?</strong><br>
+                        No. The Stockfish engine only runs in your own browser. Your opponent never sees your analysis, and you never see theirs.
+                        The server only sees normal game messages (moves, draw offers, etc.) – it has no access to engine evaluations or suggestions.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        <strong>What happens if I refresh during a game?</strong><br>
+                        Your WebSocket reconnects automatically. You can request the current game state to catch up, and the game continues normally.
+                        However, if you're playing against the bot, the bot's WebSocket connection is separate, so the bot will continue playing
+                        even if you refresh.
+                    </p>
+                    <p style="margin-bottom: 8px;">
+                        <strong>Why no accounts or ratings?</strong><br>
+                        To keep things simple and private. No accounts means no passwords to manage, no email addresses to protect, and no risk of
+                        data breaches. No ratings means no pressure to grind for points – just play chess.
+                    </p>
+                    <p style="margin-bottom: 0;">
+                        <strong>Can I play on mobile?</strong><br>
+                        Yes. The site is designed to work on mobile devices, including small iPhones. Touch interactions work for moving pieces,
+                        and the layout adapts to screen size. However, bot play and analysis require SharedArrayBuffer support, which may not be
+                        available on all mobile browsers or HTTP connections.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

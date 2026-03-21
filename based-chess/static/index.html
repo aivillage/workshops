@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>based</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+    <div class="container">
+        <div id="lobby" class="lobby-panel">
+            <div class="lobby-logo">
+                <span class="logo-based">based</span><span class="logo-mobi">.mobi</span>
+            </div>
+            <div class="lobby-actions">
+                <div class="lobby-action">
+                    <button id="create-room-btn" class="btn btn-primary">Create Room</button>
+                    <p class="action-help">Create a new room and wait for an opponent to join.</p>
+                    <div style="margin-top: 10px; text-align: left;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333;">
+                            <input type="checkbox" id="password-protect-checkbox" style="cursor: pointer;">
+                            <span>Protect with password</span>
+                        </label>
+                        <input type="password" id="room-password-input" placeholder="Password (max 20 chars)" maxlength="20" style="display: none; margin-top: 8px; width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333; margin-top: 8px;">
+                            <input type="checkbox" id="disable-spectators-checkbox" style="cursor: pointer;">
+                            <span>Disable spectators</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333; margin-top: 8px;">
+                            <input type="checkbox" id="play-against-bot-checkbox" style="cursor: pointer;">
+                            <span>Play against Bot</span>
+                        </label>
+                        <p id="bot-help-text" style="display: none; margin-top: 5px; font-size: 0.85em; color: #666; font-style: italic; padding-left: 24px;">
+                            A bot will automatically join as the second player. You can start the game immediately once the bot joins.
+                        </p>
+                        <div id="bot-difficulty-container" style="display: none; margin-top: 10px; padding-left: 24px;">
+                            <label style="display: block; margin-bottom: 5px; color: #333; font-weight: 600; font-size: 0.85em;">Stockfish Difficulty:</label>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <input type="range" id="bot-difficulty-slider" min="1" max="20" value="10" style="flex: 1; cursor: pointer;">
+                                <span id="bot-difficulty-value" style="min-width: 40px; text-align: right; font-weight: 600; color: #333;">10</span>
+                            </div>
+                        </div>
+                        <div id="bot-status" style="display: none; margin-top: 5px; font-size: 0.85em; padding-left: 24px; font-weight: 500; color: #28a745;">✅ Bot ready</div>
+                        <div style="margin-top: 10px;">
+                            <label style="display: block; margin-bottom: 8px; color: #333; font-weight: 600;">Time Control:</label>
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333;">
+                                    <input type="radio" name="time-control" value="bullet" id="time-control-bullet" style="cursor: pointer;">
+                                    <span>Bullet (2+1)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333;">
+                                    <input type="radio" name="time-control" value="blitz" id="time-control-blitz" checked style="cursor: pointer;">
+                                    <span>Blitz (3+2)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333;">
+                                    <input type="radio" name="time-control" value="rapid" id="time-control-rapid" style="cursor: pointer;">
+                                    <span>Rapid (15+10)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333;">
+                                    <input type="radio" name="time-control" value="classical" id="time-control-classical" style="cursor: pointer;">
+                                    <span>Classical (60+30)</span>
+                                </label>
+                            </div>
+                            <div style="margin-top: 10px; font-size: 0.85em;">
+                                <a href="/about.html" style="color: #007bff; text-decoration: none;">About this site</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="games-list-container" style="margin-top: 20px;">
+                <!-- Tab Navigation -->
+                <div style="display: flex; gap: 10px; margin-bottom: 10px; border-bottom: 2px solid #ddd;">
+                    <button id="tab-active-games" class="tab-button active" style="padding: 8px 16px; background: none; border: none; border-bottom: 2px solid #007bff; color: #007bff; cursor: pointer; font-size: 0.9em; font-weight: 600;">Active Games</button>
+                    <button id="tab-recent-games" class="tab-button" style="padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: #666; cursor: pointer; font-size: 0.9em;">Recent Games</button>
+                </div>
+                
+                <!-- Active Games Tab Content -->
+                <div id="active-games-tab" class="tab-content">
+                    <input type="text" id="games-search-input" placeholder="Search games..." style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 0.85em;">
+                    <div id="games-list-wrapper">
+                        <table id="games-list-table" style="width: 100%; border-collapse: collapse; font-size: 0.75em; table-layout: fixed;">
+                            <thead>
+                                <tr>
+                                    <th id="sort-number" class="sortable-header" style="width: 50px; text-align: center; padding: 3px 4px; border-bottom: 2px solid #ddd; cursor: pointer;">#</th>
+                                    <th id="sort-players" class="sortable-header" style="width: 30%; text-align: center; padding: 3px 4px; border-bottom: 2px solid #ddd; cursor: pointer;">Players</th>
+                                    <th id="sort-status" class="sortable-header" style="width: 20%; text-align: center; padding: 3px 4px; border-bottom: 2px solid #ddd; cursor: pointer;">Status</th>
+                                    <th style="width: 15%; text-align: center; padding: 3px 4px; border-bottom: 2px solid #ddd;">Time</th>
+                                    <th style="width: auto; text-align: center; padding: 3px 4px; border-bottom: 2px solid #ddd;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="games-list-tbody">
+                                <tr>
+                                    <td colspan="5" style="padding: 6px; text-align: center; color: #333;">Loading games...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Recent Games Tab Content -->
+                <div id="recent-games-tab" class="tab-content" style="display: none;">
+                    <div id="recent-games-list" style="font-size: 0.85em;">
+                        <div style="padding: 20px; text-align: center; color: #666;">Loading recent games...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="game-layout-container" style="display: none;">
+            <div id="game-left-panel">
+                <nav id="game-controls-top" class="game-controls-nav" style="display: none;">
+                    <div class="game-controls-buttons">
+                        <button id="offer-draw-btn" class="btn btn-info">Offer Draw</button>
+                        <button id="accept-draw-btn" class="btn btn-success" style="display: none;">Accept Draw</button>
+                        <button id="resign-btn" class="btn btn-danger">Resign</button>
+                        <button id="promotion-cycle-btn" class="btn btn-light promotion-btn" style="display: none;">Promote: Queen</button>
+                        <button id="analysis-toggle-btn" class="btn btn-info" style="display: none;" title="Analysis: On (click to disable)">🔍</button>
+                    </div>
+                </nav>
+                
+                <div id="spectator-controls" style="display: none; margin-bottom: 10px; gap: 10px; justify-content: center;">
+                    <button id="return-to-lobby-btn" class="btn btn-secondary">Return to Lobby</button>
+                    <button id="flip-view-btn" class="btn btn-secondary">Flip View</button>
+                </div>
+                
+                <div id="chessboard-container">
+                    <div id="opponent-name-display" class="player-name-display" style="display: none;">
+                        <span id="opponent-result-indicator" style="display: none; margin-right: 8px;"></span>
+                        <span id="opponent-name-board-text">-</span>
+                        <span id="opponent-timer" class="timer-display" style="margin-left: 8px; font-family: monospace; font-size: 0.9em;"></span>
+                        <span id="opponent-turn-indicator" style="display: none; margin-left: 8px;">⚪</span>
+                    </div>
+                    <div id="chessboard"></div>
+                    <div id="player-name-display" class="player-name-display" style="display: none;">
+                        <span id="player-result-indicator" style="display: none; margin-right: 8px;"></span>
+                        <span id="player-name-board-text">-</span>
+                        <span id="player-timer" class="timer-display" style="margin-left: 8px; font-family: monospace; font-size: 0.9em;"></span>
+                        <span id="player-turn-indicator" style="display: none; margin-left: 8px;">⚪</span>
+                    </div>
+                    <div id="game-status-text" class="status-text"></div>
+                    <div id="move-notation-display"></div>
+                    <div id="spectator-count-display" style="margin-bottom: 10px; color: #666; font-size: 0.9em; text-align: center;"></div>
+                </div>
+                
+                <div class="controls" id="game-controls-container" style="display: none;">
+                    <button id="start-game-btn" class="btn">Start Game</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Polyfill for CommonJS exports in browser
+        if (typeof exports === 'undefined') {
+            var exports = {};
+        }
+    </script>
+    <script src="/static/chess.min.js?v=1"></script>
+    <script>
+        // Make Chess available globally from exports
+        if (typeof exports !== 'undefined' && exports.Chess) {
+            window.Chess = exports.Chess;
+        }
+        
+        // Configure Stockfish to use local files before loading
+        window.Stockfish = window.Stockfish || {};
+        window.Stockfish.locateFile = function(path) {
+            if (path === 'stockfish.worker.js') {
+                return '/static/stockfish.worker.js';
+            }
+            if (path === 'stockfish.wasm') {
+                return '/static/stockfish.wasm';
+            }
+            return '/static/' + path;
+        };
+    </script>
+    <script src="/static/stockfish.js"></script>
+    <script type="module" src="/static/app.js?v=9"></script>
+</body>
+</html>

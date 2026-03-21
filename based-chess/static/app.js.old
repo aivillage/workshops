@@ -1,0 +1,3986 @@
+// WebSocket connection
+let ws = null;
+let playerId = null;
+let playerName = null;
+let currentGame = null;
+let myColor = null;
+let selectedSquare = null;
+let validMoves = []; // Array of valid destination squares for selected piece
+let boardState = {};
+let gameStarted = false;
+let iAmReady = false;
+let countdownTimer = null;
+let promotionChoices = ['q', 'n', 'r', 'b']; // queen, knight, rook, bishop
+let promotionIndex = 0;
+let draggedPiece = null; // Track piece being dragged
+let dragStartSquare = null;
+let gamesListData = {}; // Store games list data to track password protection
+let allGames = []; // Store all games for client-side filtering/sorting
+let currentSortColumn = null; // Current sort column ('players', 'status', null)
+let sortDirection = 'asc'; // 'asc' or 'desc'
+let gameEndSoundPlayed = false; // Track if end-game sound has been played for current game
+let previousMoveCount = 0; // Track previous move count to detect new moves
+let rematchRequested = false; // Track if we requested rematch
+let rematchAccepted = false; // Track if we accepted rematch
+let rematchButtonClickCount = 0; // Track rematch button clicks (3-click confirmation)
+let rematchButtonOriginalText = ''; // Original rematch button text
+let rematchButtonTimeout = null; // Timeout for rematch button reset
+let rematchTimeoutTimer = null; // Timer for 10-second rematch timeout
+let isSpectator = false; // Track if user is spectating
+let spectatorViewColor = 'white'; // Default view color for spectators (can flip)
+let whiteTimeRemaining = null; // Store white time remaining (seconds)
+let blackTimeRemaining = null; // Store black time remaining (seconds)
+let lastTimeUpdate = null; // Timestamp of last time update from server
+let timerInterval = null; // Client-side countdown interval
+
+// Bot state
+let playAgainstBot = false; // Whether bot mode is enabled
+let botColor = null; // Color the bot is playing ('white' or 'black')
+let botThinking = false; // Whether bot is currently thinking
+let botWs = null; // Second WebSocket connection for the bot
+let botPlayerId = null; // Player ID of the bot connection
+let botRoomId = null; // Room ID the bot should join
+let botPassword = null; // Password for the bot room (if any)
+let stockfishEngine = null; // Stockfish WASM engine instance
+let stockfishCallback = null; // Current callback waiting for Stockfish response
+let botLevel = 10; // Stockfish skill level (1-20, higher = stronger)
+
+// Chess piece images - will be loaded as base64 from server
+let pieceImageUrls = {};
+
+
+// Load piece images as base64 from server for better performance
+async function loadPieceImages() {
+    try {
+        const response = await fetch('/piece-images');
+        if (response.ok) {
+            const data = await response.json();
+            pieceImageUrls = data;
+            
+            // Preload images to ensure they're cached
+            Object.values(pieceImageUrls).forEach(dataUri => {
+                const img = new Image();
+                img.src = dataUri;
+            });
+        } else {
+            console.warn('Failed to load piece images, falling back to static URLs');
+            // Fallback to static URLs if base64 loading fails
+            pieceImageUrls = {
+                'K': '/static/images/white_king.png',
+                'Q': '/static/images/white_queen.png',
+                'R': '/static/images/white_rook.png',
+                'B': '/static/images/white_bishop.png',
+                'N': '/static/images/white_knight.png',
+                'P': '/static/images/white_pawn.png',
+                'k': '/static/images/black_king.png',
+                'q': '/static/images/black_queen.png',
+                'r': '/static/images/black_rook.png',
+                'b': '/static/images/black_bishop.png',
+                'n': '/static/images/black_knight.png',
+                'p': '/static/images/black_pawn.png'
+            };
+        }
+    } catch (error) {
+        console.error('Error loading piece images:', error);
+        // Fallback to static URLs
+        pieceImageUrls = {
+            'K': '/static/images/white_king.png',
+            'Q': '/static/images/white_queen.png',
+            'R': '/static/images/white_rook.png',
+            'B': '/static/images/white_bishop.png',
+            'N': '/static/images/white_knight.png',
+            'P': '/static/images/white_pawn.png',
+            'k': '/static/images/black_king.png',
+            'q': '/static/images/black_queen.png',
+            'r': '/static/images/black_rook.png',
+            'b': '/static/images/black_bishop.png',
+            'n': '/static/images/black_knight.png',
+            'p': '/static/images/black_pawn.png'
+        };
+    }
+}
+
+// Sound effects handler
+function playSound(soundFile) {
+    // Only play sounds when in an active game (not in lobby)
+    // Check both currentGame and that we're not showing the lobby
+    const lobby = document.getElementById('lobby');
+    const isInLobby = lobby && lobby.style.display !== 'none';
+    
+    if (!currentGame || !gameStarted || isInLobby) {
+        return;
+    }
+    
+    try {
+        const audio = new Audio(`/static/sounds/${soundFile}`);
+        audio.volume = 0.5; // Set volume to 50%
+        audio.play().catch(err => {
+            // Ignore errors (e.g., user hasn't interacted with page yet)
+            console.log('Sound play prevented:', err);
+        });
+    } catch (error) {
+        console.error('Error playing sound:', error);
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', async () => {
+    
+    // Load piece images as base64 first
+    await loadPieceImages();
+    createChessboard();
+    connectWebSocket();
+    
+    // Lobby buttons
+    const createRoomBtn = document.getElementById('create-room-btn');
+    if (createRoomBtn) {
+        createRoomBtn.addEventListener('click', createRoom);
+    }
+    
+    // Password protection checkbox
+    const passwordCheckbox = document.getElementById('password-protect-checkbox');
+    const passwordInput = document.getElementById('room-password-input');
+    if (passwordCheckbox && passwordInput) {
+        passwordCheckbox.addEventListener('change', () => {
+            passwordInput.style.display = passwordCheckbox.checked ? 'block' : 'none';
+            if (!passwordCheckbox.checked) {
+                passwordInput.value = '';
+            }
+        });
+    }
+    
+    // Bot checkbox help text
+    const botCheckbox = document.getElementById('play-against-bot-checkbox');
+    const botHelpText = document.getElementById('bot-help-text');
+    const botDifficultyContainer = document.getElementById('bot-difficulty-container');
+    const botDifficultySlider = document.getElementById('bot-difficulty-slider');
+    const botDifficultyValue = document.getElementById('bot-difficulty-value');
+    
+    if (botCheckbox && botHelpText) {
+        botCheckbox.addEventListener('change', () => {
+            const isChecked = botCheckbox.checked;
+            botHelpText.style.display = isChecked ? 'block' : 'none';
+            if (botDifficultyContainer) {
+                botDifficultyContainer.style.display = isChecked ? 'block' : 'none';
+            }
+            playAgainstBot = isChecked;
+            
+            if (isChecked) {
+                // Show status element when bot mode is enabled
+                const statusElement = document.getElementById('bot-status');
+                if (statusElement) {
+                    statusElement.style.display = 'block';
+                }
+                console.log('[Bot] 🎮 Bot mode enabled');
+                initializeStockfish();
+            } else {
+                // Clean up when unchecked
+                console.log('[Bot] 🧹 Bot mode disabled');
+                cleanupStockfish();
+                const statusElement = document.getElementById('bot-status');
+                if (statusElement) {
+                    statusElement.style.display = 'none';
+                }
+            }
+        });
+    }
+    
+    // Bot difficulty slider
+    if (botDifficultySlider && botDifficultyValue) {
+        // Update display when slider changes
+        botDifficultySlider.addEventListener('input', () => {
+            botLevel = parseInt(botDifficultySlider.value, 10);
+            botDifficultyValue.textContent = botLevel;
+            // Update Stockfish skill level if already initialized
+            if (stockfishEngine) {
+                console.log(`[Bot] 🔧 Updating Stockfish skill level to ${botLevel}`);
+                stockfishEngine.postMessage(`setoption name Skill Level value ${botLevel}`);
+            }
+        });
+    }
+    
+    
+    // Games list search
+    const gamesSearchInput = document.getElementById('games-search-input');
+    if (gamesSearchInput) {
+        gamesSearchInput.addEventListener('input', () => {
+            filterAndRenderGames();
+        });
+    }
+    
+    // Sortable headers
+    const sortPlayers = document.getElementById('sort-players');
+    const sortStatus = document.getElementById('sort-status');
+    if (sortPlayers) {
+        sortPlayers.addEventListener('click', () => {
+            if (currentSortColumn === 'players') {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = 'players';
+                sortDirection = 'asc';
+            }
+            filterAndRenderGames();
+        });
+    }
+    if (sortStatus) {
+        sortStatus.addEventListener('click', () => {
+            if (currentSortColumn === 'status') {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = 'status';
+                sortDirection = 'asc';
+            }
+            filterAndRenderGames();
+        });
+    }
+    
+    // Game control buttons
+    const startBtn = document.getElementById('start-game-btn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.addEventListener('click', startGame);
+    }
+    
+    const offerDrawBtn = document.getElementById('offer-draw-btn');
+    const acceptDrawBtn = document.getElementById('accept-draw-btn');
+    const resignBtn = document.getElementById('resign-btn');
+    const promoBtn = document.getElementById('promotion-cycle-btn');
+    
+    if (offerDrawBtn) {
+        offerDrawBtn.addEventListener('click', offerDraw);
+    }
+    if (acceptDrawBtn) {
+        acceptDrawBtn.addEventListener('click', acceptDraw);
+    }
+    if (resignBtn) {
+        resignBtn.addEventListener('click', resign);
+        resignButtonOriginalText = resignBtn.textContent || 'Resign';
+    }
+    if (promoBtn) {
+        promoBtn.addEventListener('click', cyclePromotionChoice);
+        updatePromotionButton();
+    }
+    
+    // Spectator controls
+    const returnToLobbyBtn = document.getElementById('return-to-lobby-btn');
+    const flipViewBtn = document.getElementById('flip-view-btn');
+    
+    if (returnToLobbyBtn) {
+        returnToLobbyBtn.addEventListener('click', returnToLobby);
+    }
+    if (flipViewBtn) {
+        flipViewBtn.addEventListener('click', flipSpectatorView);
+    }
+    
+});
+
+function createChessboard() {
+    const board = document.getElementById('chessboard');
+    board.innerHTML = '';
+    
+    // Create 64 squares
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const square = document.createElement('div');
+            square.className = 'square';
+            square.classList.add((row + col) % 2 === 0 ? 'light' : 'dark');
+            square.dataset.row = row;
+            square.dataset.col = col;
+            // Add click handler - spectators will be blocked in handleSquareClick
+            square.addEventListener('click', () => handleSquareClick(row, col));
+            
+            // Add square label element
+            const label = document.createElement('span');
+            label.className = 'square-label';
+            square.appendChild(label);
+            
+            board.appendChild(square);
+        }
+    }
+    
+    // Setup drag and drop
+    setupDragAndDrop();
+    // Update square labels
+    updateSquareLabels();
+}
+
+async function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => {
+        // Connection established
+    };
+    
+    ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        handleMessage(message);
+    };
+    
+    ws.onclose = () => {
+        updateGameStatus('Disconnected. Reconnecting...');
+        // Disable start button when disconnected
+        const startBtn = document.getElementById('start-game-btn');
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Connecting...';
+        }
+        // Reconnect after 2 seconds
+        setTimeout(connectWebSocket, 2000);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        updateGameStatus('Connection error. Reconnecting...');
+    };
+}
+
+// Connect bot WebSocket for bot mode
+function connectBotWebSocket() {
+    if (!playAgainstBot || botRoomId === null) {
+        console.log('[Bot] ⏭️ Skipping bot WebSocket connection - bot mode disabled or no room ID');
+        return;
+    }
+    
+    console.log('[Bot] 🔌 Connecting bot WebSocket to room:', botRoomId);
+    
+    // Close existing bot connection if any
+    if (botWs) {
+        console.log('[Bot] 🧹 Closing existing bot WebSocket connection');
+        botWs.close();
+        botWs = null;
+    }
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    console.log('[Bot] 📡 Creating bot WebSocket:', wsUrl);
+    botWs = new WebSocket(wsUrl);
+    
+    botWs.onopen = () => {
+        console.log('[Bot] ✅ Bot WebSocket connected');
+    };
+    
+    botWs.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            console.log('[Bot] 📨 Bot WebSocket message received:', message.type);
+            handleBotMessage(message);
+        } catch (error) {
+            console.error('[Bot] ❌ Error parsing bot WebSocket message:', error, event.data);
+        }
+    };
+    
+    botWs.onclose = () => {
+        console.log('[Bot] 🔌 Bot WebSocket closed');
+        botWs = null;
+        // Reconnect after 2 seconds if still in bot mode
+        if (playAgainstBot && botRoomId) {
+            console.log('[Bot] 🔄 Reconnecting bot WebSocket in 2 seconds...');
+            setTimeout(connectBotWebSocket, 2000);
+        }
+    };
+    
+    botWs.onerror = (error) => {
+        console.error('[Bot] ❌ Bot WebSocket error:', error);
+    };
+}
+
+// Handle messages on bot WebSocket
+function handleBotMessage(message) {
+    switch (message.type) {
+        case 'connected':
+            console.log('[Bot] ✅ Bot connected, player ID:', message.player_id);
+            botPlayerId = message.player_id;
+            // Set bot name to "Stockfish"
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                console.log('[Bot] 📤 Setting bot name to "Stockfish"');
+                botWs.send(JSON.stringify({ 
+                    type: 'set_player_name', 
+                    name: 'Stockfish' 
+                }));
+            }
+            // Join the room
+            if (botRoomId && botWs && botWs.readyState === WebSocket.OPEN) {
+                const joinMsg = {
+                    type: 'join_room',
+                    room_id: botRoomId
+                };
+                if (botPassword) {
+                    joinMsg.password = botPassword;
+                }
+                console.log('[Bot] 📤 Joining room:', botRoomId);
+                botWs.send(JSON.stringify(joinMsg));
+            }
+            break;
+        
+        case 'room_joined':
+            console.log('[Bot] ✅ Bot joined room');
+            // Automatically set bot ready after a short delay
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    console.log('[Bot] 📤 Setting bot ready');
+                    botWs.send(JSON.stringify({ type: 'player_ready' }));
+                    // Request game state after setting ready in case game already started
+                    setTimeout(() => {
+                        if (botWs && botWs.readyState === WebSocket.OPEN) {
+                            botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                        }
+                    }, 500);
+                }, 1000); // Delay to ensure room state is ready
+            }
+            break;
+        
+        case 'game_state':
+            // Update bot color from game state
+            if (message.your_color && message.your_color !== 'spectator') {
+                if (botColor !== message.your_color) {
+                    console.log(`[Bot] 🎨 Bot color set to: ${message.your_color}`);
+                    botColor = message.your_color;
+                }
+            }
+            
+            // Check if a draw was offered to the bot - bot always rejects draws
+            // Draw is implicitly rejected by making a move when it's bot's turn
+            if (message.draw_offered_by && message.draw_offered_by !== botPlayerId) {
+                console.log('[Bot] 🤝 Draw offer detected, will reject by making a move');
+                // The draw will be rejected when bot makes its move (moves implicitly reject draws)
+            }
+            
+            // Skip timer-only updates when bot is thinking to avoid interrupting Stockfish
+            // Only skip if: bot is thinking AND it's bot's turn AND we've already processed this exact turn
+            // If turn changed (opponent's turn now), we should process it to update lastProcessedTurn
+            if (botThinking && message.turn === botColor && lastProcessedTurn === message.turn) {
+                console.log('[Bot] ⏭️ Skipping timer update - bot is thinking on same turn');
+                return;
+            }
+            
+            // If turn changed (even if botThinking is true), reset botThinking and update lastProcessedTurn
+            if (botThinking && message.turn !== botColor) {
+                console.log('[Bot] 🔄 Turn changed to opponent, resetting botThinking');
+                botThinking = false;
+                lastProcessedTurn = message.turn;
+            }
+            
+            // Process bot move if it's bot's turn
+            processBotGameState(message);
+            break;
+        
+        case 'game_started':
+            console.log('[Bot] 🎮 Game started!');
+            if (message.your_color && message.your_color !== 'spectator') {
+                console.log(`[Bot] 🎨 Bot color: ${message.your_color}`);
+                botColor = message.your_color;
+            }
+            // Request game state to check if it's bot's turn
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    console.log('[Bot] 📤 Requesting game state after game started');
+                    botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                }, 500);
+            }
+            break;
+        
+        case 'move_made':
+            console.log('[Bot] ✅ Move made:', message.move_uci);
+            // Reset botThinking flag since move was confirmed
+            botThinking = false;
+            // Reset last processed turn so we can process the new turn
+            lastProcessedTurn = null;
+            // Request new game state to check if it's bot's turn
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                }, 500);
+            }
+            break;
+        
+        case 'error':
+            console.error('[Bot] ❌ Server error:', message.message);
+            // Always reset botThinking flag on error to prevent getting stuck
+            console.log('[Bot] 🔄 Resetting botThinking flag due to error');
+            botThinking = false;
+            lastProcessedTurn = null; // Reset so we can retry
+            // Request game state to get current state
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                }, 500);
+            }
+            break;
+        
+        case 'draw_offered':
+            // Bot always rejects draw offers
+            console.log('[Bot] 🤝 Draw offered, rejecting...');
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                // The draw is automatically rejected by making a move, but we should explicitly reject it
+                // Since the bot doesn't have a reject_draw endpoint, we'll just ignore it (making a move rejects it)
+                // But we can also check if it's the bot's turn and make a move, which implicitly rejects
+                setTimeout(() => {
+                    if (botWs && botWs.readyState === WebSocket.OPEN) {
+                        botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                    }
+                }, 500);
+            }
+            break;
+        
+        case 'rematch_requested':
+            // Bot automatically accepts rematch requests (only the first one to avoid endless rematches)
+            console.log('[Bot] 🔄 Rematch requested, accepting...');
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    console.log('[Bot] 📤 Accepting rematch');
+                    botWs.send(JSON.stringify({ type: 'accept_rematch' }));
+                }, 500);
+            }
+            break;
+        
+        case 'rematch_started':
+            // When rematch starts, bot should set ready
+            console.log('[Bot] 🔄 Rematch started');
+            if (botWs && botWs.readyState === WebSocket.OPEN) {
+                setTimeout(() => {
+                    console.log('[Bot] 📤 Setting bot ready for rematch');
+                    botWs.send(JSON.stringify({ type: 'player_ready' }));
+                    setTimeout(() => {
+                        if (botWs && botWs.readyState === WebSocket.OPEN) {
+                            botWs.send(JSON.stringify({ type: 'get_game_state' }));
+                        }
+                    }, 500);
+                }, 1000);
+            }
+            break;
+        
+        default:
+            // Ignore other messages
+            break;
+    }
+}
+
+function handleMessage(message) {
+    switch (message.type) {
+        case 'connected':
+            playerId = message.player_id;
+            if (message.player_name) {
+                playerName = message.player_name;
+                updatePlayerNameDisplay(message.player_name);
+            } else {
+                console.log('No player_name in connected message');
+            }
+            break;
+        
+        
+        case 'lobby_status':
+            // Stop countdown when receiving lobby status (we're in lobby)
+            stopCountdown();
+            handleLobbyStatus(message);
+            // Games list is only requested when explicitly showing lobby (showLobby function)
+            break;
+        
+        case 'room_created':
+            handleRoomCreated(message);
+            break;
+        
+        case 'room_joined':
+            handleRoomJoined(message);
+            break;
+        
+        case 'room_spectated':
+            handleRoomSpectated(message);
+            break;
+        
+        case 'game_started':
+            // Colors have been assigned - update myColor from message
+            if (message.your_color && message.your_color !== 'spectator') {
+                myColor = message.your_color;
+                updateSquareLabels(); // Update labels when color is assigned
+            }
+            gameStarted = true;
+            gameEndSoundPlayed = false; // Reset end-game sound flag for new game
+            previousMoveCount = 0; // Reset move count for new game
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else if (isSpectator) {
+                updateGameStatus('Game started!');
+            } else {
+                updateGameStatus('Game started! Make your move.');
+            }
+            updateStartButton();
+            break;
+        
+        case 'opponent_joined':
+            // Opponent joined our room
+            // Immediately update waiting_for_opponent since we know opponent just joined
+            window.waitingForOpponent = false;
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else if (isSpectator) {
+                updateGameStatus('A player joined the game.');
+            } else if (playAgainstBot && message.opponent_name === 'Stockfish') {
+                // Bot mode - bot has joined and will be ready automatically
+                updateGameStatus('Stockfish joined! Press "Start Game" when ready.');
+            } else {
+                updateGameStatus('Opponent joined! Press "Start Game" when ready.');
+            }
+            updateStartButton(); // Update button immediately
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get_game_state' }));
+            }
+            break;
+        
+        case 'games_list':
+            handleGamesList(message);
+            break;
+        
+        case 'matched':
+            handleMatched(message);
+            break;
+        
+        case 'queue_status':
+            handleQueueStatus(message);
+            break;
+        
+        case 'game_state':
+            handleGameState(message);
+            break;
+        
+        // game_started case moved above to handle color assignment
+        
+        case 'error':
+            // Show error in status instead of alert
+            updateGameStatus(`Error: ${message.message}`);
+            // Re-enable buttons if error occurred in lobby
+            const createRoomBtnErr = document.getElementById('create-room-btn');
+            if (createRoomBtnErr) {
+                createRoomBtnErr.disabled = false;
+                createRoomBtnErr.textContent = 'Create Room';
+            }
+            // Clear error after 3 seconds if game is in progress
+            if (gameStarted) {
+                setTimeout(() => {
+                    const statusText = document.getElementById('game-status-text').textContent;
+                    if (statusText.startsWith('Error:')) {
+                        // Restore normal status
+                        ws.send(JSON.stringify({ type: 'get_game_state' }));
+                    }
+                }, 3000);
+            }
+            break;
+        
+        case 'draw_offered':
+            // A player offered a draw
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus('🤝 ' + message.message);
+            } else {
+                if (isSpectator) {
+                    updateGameStatus('🤝 A player offered a draw');
+                } else if (message.offered_by === playerId) {
+                    updateGameStatus('🤝 You offered a draw. Waiting for opponent to respond...');
+                } else {
+                    updateGameStatus('🤝 Opponent offered a draw. Click "Accept Draw" to accept or make a move to decline.');
+                }
+            }
+            break;
+        
+        case 'draw_accepted':
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus('🤝 ' + message.message);
+            } else {
+                updateGameStatus('🤝 Draw accepted by agreement');
+            }
+            // No specific sound for draw - it's a neutral outcome
+            // Don't start countdown, allow rematch
+            break;
+        
+        case 'draw_claimed':
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus('🤝 ' + message.message);
+            } else {
+                // Fallback to old logic if message not provided
+                if (isSpectator) {
+                    // For spectators, get player name from current game state
+                    let claimedByPlayerName = 'A player';
+                    if (currentGameState) {
+                        if (message.claimed_by === currentGameState.white_player) {
+                            claimedByPlayerName = currentGameState.white_player_name || 'White player';
+                        } else if (message.claimed_by === currentGameState.black_player) {
+                            claimedByPlayerName = currentGameState.black_player_name || 'Black player';
+                        }
+                    }
+                    const reasonText = message.reason === 'threefold_repetition' 
+                        ? 'threefold repetition' 
+                        : (message.reason === 'fifty_moves' ? 'fifty-move rule' : 'draw');
+                    updateGameStatus(`🤝 Draw claimed by ${claimedByPlayerName} (${reasonText})`);
+                } else {
+                    const reasonText = message.reason === 'threefold_repetition' 
+                        ? 'threefold repetition' 
+                        : (message.reason === 'fifty_moves' ? 'fifty-move rule' : 'draw');
+                    if (message.claimed_by === playerId) {
+                        updateGameStatus(`🤝 You claimed draw (${reasonText})`);
+                    } else {
+                        updateGameStatus(`🤝 Opponent claimed draw (${reasonText})`);
+                    }
+                }
+            }
+            // Don't start countdown, allow rematch
+            break;
+        
+        case 'resignation':
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                if (message.resigned_by === playerId) {
+                    updateGameStatus('🏳️ ' + message.message);
+                } else {
+                    updateGameStatus('🏆 ' + message.message);
+                }
+            } else {
+                // Fallback to old logic if message not provided
+                if (isSpectator) {
+                    // For spectators, get player name from current game state
+                    let resignedPlayerName = 'A player';
+                    if (currentGameState) {
+                        if (message.resigned_by === currentGameState.white_player) {
+                            resignedPlayerName = currentGameState.white_player_name || 'White player';
+                        } else if (message.resigned_by === currentGameState.black_player) {
+                            resignedPlayerName = currentGameState.black_player_name || 'Black player';
+                        }
+                    }
+                    updateGameStatus(`🏳️ ${resignedPlayerName} resigned. Game over.`);
+                } else {
+                    if (message.resigned_by === playerId) {
+                        updateGameStatus('🏳️ You resigned. Game over.');
+                    } else {
+                        updateGameStatus('🏆 Opponent resigned. You win!');
+                    }
+                }
+            }
+            // Play winner/loser sound based on who resigned (only if not already played)
+            if (!gameEndSoundPlayed && !isSpectator) {
+                if (message.resigned_by === playerId) {
+                    playSound('loser.mp3');
+                } else {
+                    playSound('winner.mp3');
+                }
+                gameEndSoundPlayed = true;
+            }
+            // Don't start countdown, allow rematch
+            break;
+        
+        case 'opponent_left':
+            // Opponent left before game started - reset ready state and allow waiting for new opponent
+            iAmReady = false;
+            gameStarted = false;
+            previousMoveCount = 0; // Reset move count
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else if (isSpectator) {
+                updateGameStatus('A player left the game.');
+            } else {
+                updateGameStatus('Opponent left. Waiting for a new opponent to join...');
+            }
+            updateStartButton();
+            // Request updated game state to refresh UI
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get_game_state' }));
+            }
+            // Clear opponent name display
+            updateOpponentName(null);
+            break;
+        
+        case 'left_game':
+            // Player successfully left game
+            updateGameStatus('Left game. Joining new game...');
+            break;
+        
+        case 'opponent_disconnected':
+            // Only treat as game end if game has started
+            if (gameStarted) {
+                // Use server-provided message if available, otherwise use default
+                if (message.message) {
+                    updateGameStatus(message.message);
+                } else {
+                    updateGameStatus('Opponent disconnected. Game ended. Returning to lobby...');
+                }
+                gameStarted = false;
+                iAmReady = false;
+                updateStartButton();
+                stopCountdown();
+                // Don't start countdown if in rematch period, otherwise allow rematch
+                // Server will handle kicking if needed
+                // Fallback: if kick-to-lobby message is missed, pull status after delay
+                setTimeout(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'get_lobby_status' }));
+                    }
+                }, 6000);
+            } else {
+                // Game hasn't started - treat same as opponent_left
+                iAmReady = false;
+                gameStarted = false;
+                // Use server-provided message if available, otherwise use default
+                if (message.message) {
+                    updateGameStatus(message.message);
+                } else {
+                    updateGameStatus('Opponent disconnected. Waiting for a new opponent to join...');
+                }
+                updateStartButton();
+                // Request updated game state to refresh UI
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'get_game_state' }));
+                }
+                // Clear opponent name display
+                updateOpponentName(null);
+            }
+            break;
+
+        case 'kicked_to_lobby':
+            // Server forced us back to the lobby after game end/forfeit
+            stopCountdown();
+            showLobby();
+            updateGameStatus(message.message || 'Returning to lobby...');
+            updateTurnStatus(null, null);
+            hideResultIndicators();
+            selectedSquare = null;
+            validMoves = [];
+            boardState = {};
+            currentGame = null;
+            gameStarted = false;
+            iAmReady = false;
+            draggedPiece = null;
+            dragStartSquare = null;
+            updateStartButton();
+            resetResignButton();
+            resetDrawButton();
+            previousDrawOfferedBy = null; // Reset draw offer tracking
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get_lobby_status' }));
+            }
+            break;
+        
+        case 'kicked_to_lobby':
+            // This message is sent when being kicked to lobby, but we should already be showing countdown
+            // Just stop any countdown if it's still running
+            stopCountdown();
+            break;
+        
+        case 'legal_moves':
+            // Received legal moves for selected square
+            if (message.square === selectedSquare) {
+                validMoves = message.valid_squares || [];
+                renderBoard();
+            }
+            break;
+        
+        case 'rematch_requested':
+            // Opponent requested rematch (this message is sent when opponent requests)
+            // Rematch state is also tracked in game_state
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else {
+                updateGameStatus('Opponent requested rematch. Click "Rematch" to accept.');
+            }
+            updateStartButton();
+            break;
+        
+        case 'rematch_accepted':
+            // Opponent accepted rematch (this message is sent when opponent accepts)
+            // Rematch state is also tracked in game_state
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else {
+                updateGameStatus('Opponent accepted rematch. Waiting for both players...');
+            }
+            updateStartButton();
+            break;
+        
+        case 'rematch_started':
+            // Rematch started - new game beginning
+            gameStarted = false;
+            iAmReady = false;
+            gameEndSoundPlayed = false;
+            previousMoveCount = 0; // Reset move count
+            rematchRequested = false;
+            rematchAccepted = false;
+            selectedSquare = null;
+            validMoves = [];
+            draggedPiece = null;
+            dragStartSquare = null;
+            if (message.your_color && message.your_color !== 'spectator') {
+                myColor = message.your_color;
+            }
+            // Use server-provided message if available, otherwise use default
+            if (message.message) {
+                updateGameStatus(message.message);
+            } else if (isSpectator) {
+                const whiteName = message.white_player_name || 'White player';
+                const blackName = message.black_player_name || 'Black player';
+                updateGameStatus(`Rematch started! Waiting for ${whiteName} and ${blackName} to begin the game...`);
+            } else {
+                updateGameStatus('Rematch started! Press "Start Game" when ready.');
+            }
+            updateStartButton();
+            resetRematchButton();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get_game_state' }));
+            }
+            break;
+        
+        case 'rematch_rejected':
+            // Rematch was rejected
+            updateGameStatus(message.message || 'Rematch declined.');
+            rematchRequested = false;
+            rematchAccepted = false;
+            resetRematchButton();
+            break;
+        
+        case 'rematch_timeout':
+            // Rematch request timed out
+            // Use server-provided message if available, otherwise use default
+            updateGameStatus(message.message || 'Rematch request timed out. The request expired after 10 seconds.');
+            rematchRequested = false;
+            rematchAccepted = false;
+            resetRematchButton();
+            break;
+    }
+}
+
+function handleLobbyStatus(message) {
+    const lobby = document.getElementById('lobby');
+    const lobbyStatusText = document.getElementById('lobby-status-text');
+    const queueInfo = document.getElementById('queue-info');
+    const createRoomBtn = document.getElementById('create-room-btn');
+    
+    if (message.status === 'in_lobby') {
+        showLobby();
+        if (lobbyStatusText) {
+            lobbyStatusText.textContent = 'You are in the lobby. Create a room or join an existing game.';
+        }
+        if (queueInfo) {
+            const activeGames = message.active_games_count || 0;
+            queueInfo.textContent = `${activeGames} active game(s)`;
+        }
+        if (createRoomBtn) {
+            createRoomBtn.disabled = false;
+            createRoomBtn.textContent = 'Create Room';
+        }
+        // Games list is only requested when explicitly showing lobby (showLobby function)
+    } else if (message.status === 'in_queue') {
+        showLobby();
+        if (lobbyStatusText) {
+            lobbyStatusText.textContent = 'Waiting for matchmaking...';
+        }
+        if (queueInfo) {
+            const activeGames = message.active_games_count || 0;
+            const position = message.position || '?';
+            const queueCount = message.players_in_queue || 0;
+            let infoText = `Position in queue: ${position} of ${queueCount} player(s)`;
+            if (activeGames > 0) {
+                infoText += ` • ${activeGames} active game(s)`;
+            }
+            queueInfo.textContent = infoText;
+        }
+        if (createRoomBtn) {
+            createRoomBtn.disabled = true;
+            createRoomBtn.textContent = 'Waiting for match...';
+        }
+    } else if (message.status === 'in_game') {
+        hideLobby();
+        currentGame = message.game_id;
+        myColor = message.color;
+        gameStarted = message.game_started || false;
+        
+        // Request game state
+        ws.send(JSON.stringify({ type: 'get_game_state' }));
+    }
+}
+
+function handleRoomCreated(message) {
+    hideLobby();
+    currentGame = message.game_id;
+    myColor = message.color;  // May be null if colors not assigned yet
+    gameStarted = false;
+    iAmReady = false;
+    gameEndSoundPlayed = false; // Reset end-game sound flag
+    previousMoveCount = 0; // Reset move count
+    
+    // Initialize waiting_for_opponent - room just created, so only host is present
+    window.waitingForOpponent = true;
+    
+    // Update room info
+    updateRoomInfo(message);
+    
+    // Ensure player name is still displayed
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+    
+    // If bot mode is enabled, connect bot and join room
+    if (playAgainstBot) {
+        botRoomId = message.room_id;
+        console.log('[Bot] 🎮 Room created with bot mode, room ID:', botRoomId);
+        console.log('[Bot] 🚀 Bot ready for room');
+        connectBotWebSocket();
+        updateGameStatus('Room created! Bot is joining...');
+    } else {
+        updateGameStatus('Room created! Waiting for opponent to join...');
+    }
+    updatePromotionButton();
+    
+    // Request game state
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_game_state' }));
+    }
+    updateStartButton();
+    
+    // Re-enable create room button
+    const createRoomBtn = document.getElementById('create-room-btn');
+    if (createRoomBtn) {
+        createRoomBtn.disabled = false;
+        createRoomBtn.textContent = 'Create Room';
+    }
+}
+
+function handleRoomJoined(message) {
+    hideLobby();
+    currentGame = message.game_id;
+    myColor = message.color;  // May be null if colors not assigned yet
+    gameStarted = false;
+    iAmReady = false;
+    gameEndSoundPlayed = false; // Reset end-game sound flag
+    previousMoveCount = 0; // Reset move count
+    
+    // Initialize waiting_for_opponent - will be updated by game state
+    // If we're joining, there should be at least one other player (the host)
+    window.waitingForOpponent = false;
+    
+    // Update room info
+    updateRoomInfo(message);
+    
+    // Ensure player name is still displayed
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+    
+    // Update status - don't mention color if not assigned yet
+    if (myColor) {
+        updateGameStatus(`Joined room! You are ${myColor === 'white' ? 'White' : 'Black'}. Press "Start Game" when ready.`);
+    } else {
+        updateGameStatus('Joined room! Press "Start Game" when ready. Colors will be assigned randomly.');
+    }
+    updatePromotionButton();
+    
+    // Request game state
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_game_state' }));
+    }
+    updateStartButton();
+}
+
+function handleRoomSpectated(message) {
+    isSpectator = true;
+    spectatorViewColor = 'white'; // Default to white view
+    hideLobby();
+    currentGame = message.game_id;
+    myColor = 'white'; // Set initial view color for spectators (they can flip it)
+    gameStarted = false;
+    iAmReady = false;
+    gameEndSoundPlayed = false;
+    previousMoveCount = 0;
+    selectedSquare = null;
+    validMoves = [];
+    boardState = {};
+    
+    // Update room info
+    updateRoomInfo(message);
+    
+    // Ensure player name is still displayed
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+    
+    updateGameStatus('Spectating game...');
+    updatePromotionButton();
+    
+    // Initialize board view
+    updateSquareLabels();
+    
+    // Request game state
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_game_state' }));
+    }
+    updateStartButton();
+}
+
+function handleGamesList(message) {
+    const games = message.games || [];
+    
+    // Store all games for client-side filtering/sorting
+    allGames = games.map(game => {
+        // Store game data for password checking
+        gamesListData[game.room_id] = {
+            has_password: game.has_password || false
+        };
+        
+        return {
+            ...game,
+            whiteName: game.white_player_name || 'Waiting...',
+            blackName: game.black_player_name || 'Waiting...',
+            status: game.game_started ? 'In Progress' : (game.waiting_for_player ? 'Waiting' : 'Ready'),
+            hasPassword: game.has_password || false,
+            allow_spectators: game.allow_spectators !== false, // Default to true if not specified
+            isMyGame: (game.white_player === playerId || game.black_player === playerId) ||
+                     (game.player1 === playerId || game.player2 === playerId),
+            canJoin: !game.game_started && 
+                    game.waiting_for_player && 
+                    !((game.white_player === playerId || game.black_player === playerId) ||
+                      (game.player1 === playerId || game.player2 === playerId)) &&
+                    (game.white_player !== playerId && game.black_player !== playerId &&
+                     game.player1 !== playerId && game.player2 !== playerId)
+        };
+    });
+    
+    // Render the games list
+    filterAndRenderGames();
+}
+
+function filterAndRenderGames() {
+    const tbody = document.getElementById('games-list-tbody');
+    if (!tbody) return;
+    
+    // Get search term
+    const searchInput = document.getElementById('games-search-input');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    
+    // Filter games
+    let filteredGames = allGames.filter(game => {
+        if (!searchTerm) return true;
+        const searchText = `${game.whiteName} ${game.blackName}`.toLowerCase();
+        return searchText.includes(searchTerm);
+    });
+    
+    // Sort games
+    if (currentSortColumn) {
+        filteredGames.sort((a, b) => {
+            let comparison = 0;
+            if (currentSortColumn === 'players') {
+                const aText = `${a.whiteName} vs ${a.blackName}`.toLowerCase();
+                const bText = `${b.whiteName} vs ${b.blackName}`.toLowerCase();
+                comparison = aText.localeCompare(bText);
+            } else if (currentSortColumn === 'status') {
+                comparison = a.status.localeCompare(b.status);
+            }
+            return sortDirection === 'asc' ? comparison : -comparison;
+        });
+    }
+    
+    // Render table
+    if (filteredGames.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding: 6px; text-align: center; color: #333; font-size: 0.75em;">No games found</td></tr>';
+        return;
+    }
+    
+    let html = '';
+    filteredGames.forEach((game, index) => {
+        const rowNumber = index + 1;
+        const playersText = `${game.whiteName} vs ${game.blackName}${game.hasPassword ? ' 🔒' : ''}`;
+        
+        // Format time control - capitalize first letter
+        const timeControl = game.time_control 
+            ? game.time_control.charAt(0).toUpperCase() + game.time_control.slice(1)
+            : '-';
+        
+        let actionHtml = '';
+        const spectatorCount = game.spectator_count || 0;
+        const spectatorBadge = spectatorCount > 0 ? ` 👁️ ${spectatorCount}` : '';
+        const allowSpectators = game.allow_spectators !== false; // Default to true if not specified
+        
+        if (game.canJoin) {
+            const spectateButton = allowSpectators 
+                ? `<button class="btn btn-small" onclick="spectateRoom('${game.room_id}')" style="font-size: 0.7em; padding: 4px 6px; min-width: auto;" title="Spectate">👁️</button>`
+                : `<button class="btn btn-small" disabled style="font-size: 0.7em; padding: 4px 6px; min-width: auto; opacity: 0.5; cursor: not-allowed;" title="Spectators disabled">👁️</button>`;
+            actionHtml = `<span style="display: inline-flex; gap: 4px; white-space: nowrap;"><button class="btn btn-small" onclick="joinRoom('${game.room_id}')" style="font-size: 0.7em; padding: 4px 6px; min-width: auto;" title="Join">🎮</button>${spectateButton}</span>`;
+        } else if (game.isMyGame) {
+            actionHtml = `<span style="color: #333; font-size: 0.7em;">Your Game${spectatorBadge}</span>`;
+        } else {
+            // Full game - show only spectate button (if allowed)
+            if (allowSpectators) {
+                actionHtml = `<span style="display: inline-flex; gap: 4px; white-space: nowrap;"><button class="btn btn-small" onclick="spectateRoom('${game.room_id}')" style="font-size: 0.7em; padding: 4px 6px; min-width: auto;" title="Spectate">👁️</button></span>`;
+            } else {
+                actionHtml = `<span style="display: inline-flex; gap: 4px; white-space: nowrap;"><button class="btn btn-small" disabled style="font-size: 0.7em; padding: 4px 6px; min-width: auto; opacity: 0.5; cursor: not-allowed;" title="Spectators disabled">👁️</button></span>`;
+            }
+        }
+        
+        html += `<tr style="border-bottom: 1px solid #eee;">`;
+        html += `<td style="padding: 2px 4px; color: #333; width: 50px;">${rowNumber}</td>`;
+        html += `<td style="padding: 2px 4px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${playersText}</td>`;
+        html += `<td style="padding: 2px 4px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${game.status}</td>`;
+        html += `<td style="padding: 2px 4px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${timeControl}</td>`;
+        html += `<td style="padding: 2px 4px; white-space: nowrap;">${actionHtml}</td>`;
+        html += `</tr>`;
+    });
+    
+    tbody.innerHTML = html;
+    updateSortIndicators();
+}
+
+function updateSortIndicators() {
+    // Remove all sort indicators
+    const headers = document.querySelectorAll('.sortable-header');
+    headers.forEach(header => {
+        header.textContent = header.textContent.replace(' ▲', '').replace(' ▼', '');
+    });
+    
+    // Add sort indicator to current column
+    if (currentSortColumn) {
+        const indicator = sortDirection === 'asc' ? ' ▲' : ' ▼';
+        if (currentSortColumn === 'players') {
+            const header = document.getElementById('sort-players');
+            if (header) header.textContent = 'Players' + indicator;
+        } else if (currentSortColumn === 'status') {
+            const header = document.getElementById('sort-status');
+            if (header) header.textContent = 'Status' + indicator;
+        }
+    }
+}
+
+function handleMatched(message) {
+    hideLobby();
+    currentGame = message.game_id;
+    myColor = message.color;  // May be null if colors not assigned yet (for queue matches, colors are assigned)
+    gameStarted = false;
+    iAmReady = false;
+    gameEndSoundPlayed = false; // Reset end-game sound flag
+    
+    // Initialize waiting_for_opponent - queue matches have both players, so false
+    window.waitingForOpponent = false;
+    
+    // Update room info
+    updateRoomInfo(message);
+    
+    // Ensure player name is still displayed (it should persist from lobby)
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+    
+    // Update status - queue matches have colors assigned, room matches don't
+    if (myColor) {
+        updateGameStatus(`Matched! You are ${myColor === 'white' ? 'White' : 'Black'}. Press "Start Game" when ready.`);
+    } else {
+        updateGameStatus('Matched! Press "Start Game" when ready. Colors will be assigned randomly.');
+    }
+    updatePromotionButton();
+    
+    // Request game state
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_game_state' }));
+    }
+    updateStartButton();
+}
+
+function handleQueueStatus(message) {
+    // Handle queue status (for backwards compatibility)
+    if (message.status === 'in_queue') {
+        handleLobbyStatus(message);
+    } else if (message.status === 'matched') {
+        handleMatched(message);
+    }
+}
+
+function showLobby() {
+    const lobby = document.getElementById('lobby');
+    const gameLayoutContainer = document.getElementById('game-layout-container');
+    const gameControlsContainer = document.getElementById('game-controls-container');
+    const statusText = document.getElementById('game-status-text');
+    
+    // Stop countdown immediately when showing lobby
+    stopCountdown();
+    
+    if (lobby) lobby.style.display = 'block';
+    if (gameLayoutContainer) gameLayoutContainer.style.display = 'none';
+    if (gameControlsContainer) gameControlsContainer.style.display = 'none';
+    if (statusText) statusText.style.display = 'none';
+    
+    // Clear board
+    const squares = document.querySelectorAll('.square');
+    squares.forEach(square => {
+        square.innerHTML = '';
+        square.classList.remove('selected', 'valid-move');
+    });
+    
+            // Reset game state
+    currentGame = null;
+    myColor = null;
+    gameStarted = false;
+    iAmReady = false;
+    selectedSquare = null;
+    validMoves = [];
+    boardState = {};
+    draggedPiece = null;
+    dragStartSquare = null;
+    previousMoveCount = 0; // Reset move count when returning to lobby
+    isSpectator = false;
+    spectatorViewColor = 'white';
+    
+    gameEndSoundPlayed = false; // Reset end-game sound flag
+    rematchRequested = false;
+    rematchAccepted = false;
+    window.canRematch = false;
+    window.rematchRequestedByOpponent = false;
+    resetRematchButton();
+    
+    // Clear timer interval
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+    whiteTimeRemaining = null;
+    blackTimeRemaining = null;
+    lastTimeUpdate = null;
+    
+    // Clean up bot state
+    botThinking = false;
+    botColor = null;
+    botRoomId = null;
+    botPassword = null;
+    lastProcessedTurn = null;
+    if (botWs) {
+        botWs.close();
+        botWs = null;
+    }
+    botPlayerId = null;
+    // Note: We keep Stockfish initialized as long as bot mode is enabled
+    
+    // Clear room info when returning to lobby
+    updateRoomInfo({});
+    updateGameStatus('');
+    updateTurnStatus(null, null);
+    hideResultIndicators();
+    
+    // Hide opponent name when in lobby
+    updateOpponentName(null);
+    
+    // Hide player name display below board when in lobby
+    const playerNameDisplay = document.getElementById('player-name-display');
+    if (playerNameDisplay) {
+        playerNameDisplay.style.display = 'none';
+    }
+    
+    // Reset button states
+    resetResignButton();
+    resetDrawButton();
+    hasDrawOffer = false;
+    previousDrawOfferedBy = null; // Reset draw offer tracking
+    updatePromotionButton();
+    
+            // Re-enable lobby buttons
+    const createRoomBtnLobby = document.getElementById('create-room-btn');
+    if (createRoomBtnLobby) {
+        createRoomBtnLobby.disabled = false;
+        createRoomBtnLobby.textContent = 'Create Room';
+    }
+    
+    // Request games list when showing lobby
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_games_list' }));
+    }
+    
+}
+
+function hideLobby() {
+    const lobby = document.getElementById('lobby');
+    const gameLayoutContainer = document.getElementById('game-layout-container');
+    const gameControlsContainer = document.getElementById('game-controls-container');
+    const statusText = document.getElementById('game-status-text');
+    
+    if (lobby) lobby.style.display = 'none';
+    if (gameLayoutContainer) gameLayoutContainer.style.display = 'flex';
+    if (gameControlsContainer) gameControlsContainer.style.display = 'block';
+    if (statusText) {
+        statusText.style.display = 'block';
+    }
+    // Ensure player name is visible when entering game
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+}
+
+function createRoom() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateGameStatus('Error: Not connected');
+        return;
+    }
+    
+    // Get password if protection is enabled
+    const passwordCheckbox = document.getElementById('password-protect-checkbox');
+    const passwordInput = document.getElementById('room-password-input');
+    let password = null;
+    
+    if (passwordCheckbox && passwordCheckbox.checked && passwordInput) {
+        password = passwordInput.value.trim();
+        if (password.length === 0) {
+            updateGameStatus('Error: Please enter a password or uncheck password protection');
+            return;
+        }
+        if (password.length > 20) {
+            updateGameStatus('Error: Password must be 20 characters or less');
+            return;
+        }
+    }
+    
+    // Get disable spectators setting (inverted: if checked, spectators are disabled)
+    const disableSpectatorsCheckbox = document.getElementById('disable-spectators-checkbox');
+    const allowSpectators = disableSpectatorsCheckbox ? !disableSpectatorsCheckbox.checked : true;
+    
+    // Get bot setting and password (needed for bot to join)
+    const playAgainstBotCheckbox = document.getElementById('play-against-bot-checkbox');
+    playAgainstBot = playAgainstBotCheckbox ? playAgainstBotCheckbox.checked : false;
+    botPassword = playAgainstBot && password ? password : null;
+    
+    // Get time control
+    const timeControlRadios = document.querySelectorAll('input[name="time-control"]');
+    let timeControl = 'blitz'; // default
+    for (const radio of timeControlRadios) {
+        if (radio.checked) {
+            timeControl = radio.value;
+            break;
+        }
+    }
+    
+    // Send create room message with optional password, allow_spectators, and time_control
+    const message = { type: 'create_room' };
+    if (password) {
+        message.password = password;
+    }
+    message.allow_spectators = allowSpectators;
+    message.time_control = timeControl;
+    ws.send(JSON.stringify(message));
+    
+    // Clear password field after sending
+    if (passwordInput) {
+        passwordInput.value = '';
+    }
+    if (passwordCheckbox) {
+        passwordCheckbox.checked = false;
+        passwordInput.style.display = 'none';
+    }
+    
+    
+    const createRoomBtn = document.getElementById('create-room-btn');
+    if (createRoomBtn) {
+        createRoomBtn.disabled = true;
+        createRoomBtn.textContent = 'Creating...';
+    }
+}
+
+function joinRoom(roomId) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateGameStatus('Error: Not connected');
+        return;
+    }
+    
+    // Check if room is password-protected
+    const gameData = gamesListData[roomId];
+    let password = null;
+    
+    if (gameData && gameData.has_password) {
+        // Prompt for password
+        password = prompt('This room is password-protected. Please enter the password:');
+        if (password === null) {
+            // User cancelled
+            return;
+        }
+        password = password.trim();
+    }
+    
+    // Send join room message with password
+    const message = {
+        type: 'join_room',
+        room_id: roomId
+    };
+    if (password) {
+        message.password = password;
+    }
+    ws.send(JSON.stringify(message));
+}
+
+function spectateRoom(roomId) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateGameStatus('Error: Not connected');
+        return;
+    }
+    
+    // Check if room is password-protected
+    const gameData = gamesListData[roomId];
+    let password = null;
+    
+    if (gameData && gameData.has_password) {
+        // Prompt for password
+        password = prompt('This room is password-protected. Please enter the password:');
+        if (password === null) {
+            // User cancelled
+            return;
+        }
+        password = password.trim();
+    }
+    
+    // Send spectate room message with password
+    const message = {
+        type: 'spectate_room',
+        room_id: roomId
+    };
+    if (password) {
+        message.password = password;
+    }
+    ws.send(JSON.stringify(message));
+}
+
+
+// Store current game state for access in event handlers
+let currentGameState = null;
+
+// Initialize Stockfish engine
+async function initializeStockfish() {
+    if (stockfishEngine) {
+        console.log('[Bot] ✅ Stockfish already initialized');
+        return;
+    }
+    
+    if (typeof Stockfish === 'undefined') {
+        console.error('[Bot] ❌ Stockfish not loaded. Make sure stockfish.js is included.');
+        return;
+    }
+    
+    // Check if SharedArrayBuffer is available (required for Stockfish WASM)
+    if (typeof SharedArrayBuffer === 'undefined') {
+        console.error('[Bot] ❌ SharedArrayBuffer not available. Stockfish requires SharedArrayBuffer support.');
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const isSecureContext = window.isSecureContext;
+        const protocol = window.location.protocol;
+        
+        let errorMsg = 'Bot mode requires SharedArrayBuffer support.';
+        if (isSafari) {
+            if (!isSecureContext || protocol !== 'https:') {
+                errorMsg += ' Safari requires HTTPS. Please access the site over HTTPS (not HTTP).';
+            } else {
+                errorMsg += ' Please ensure you\'re using Safari 15.2+ and the server is configured with proper security headers.';
+            }
+        } else {
+            errorMsg += ' Please try using Chrome, Firefox, or ensure you\'re on a secure context (HTTPS).';
+        }
+        console.error('[Bot] ⚠️', errorMsg);
+        console.error('[Bot] 🔍 Debug info:', { isSafari, isSecureContext, protocol });
+        
+        // Show error message in bot status element
+        const botStatus = document.getElementById('bot-status');
+        if (botStatus) {
+            botStatus.textContent = '❌ Bot unavailable (SharedArrayBuffer not supported)';
+            botStatus.style.color = '#dc3545';
+            botStatus.style.display = 'block';
+        }
+        
+        // Disable bot mode
+        const botCheckbox = document.getElementById('play-against-bot-checkbox');
+        if (botCheckbox) {
+            botCheckbox.checked = false;
+            playAgainstBot = false;
+            const botDifficultyContainer = document.getElementById('bot-difficulty-container');
+            if (botDifficultyContainer) botDifficultyContainer.style.display = 'none';
+        }
+        return;
+    }
+    
+    console.log('[Bot] 🚀 Initializing Stockfish engine...');
+    
+    try {
+        // Stockfish() returns a module factory function
+        const StockfishModule = Stockfish();
+        
+        // The module factory might return a Promise or the module directly
+        let stockfishModule;
+        if (StockfishModule && typeof StockfishModule.then === 'function') {
+            stockfishModule = await StockfishModule;
+        } else {
+            stockfishModule = StockfishModule;
+        }
+        
+        // Wait for the module to be ready if it has a ready Promise
+        if (stockfishModule && stockfishModule.ready) {
+            await stockfishModule.ready;
+        }
+        
+        // Log the module structure for debugging
+        console.log('[Bot] 🔍 Stockfish module structure:', {
+            hasAddMessageListener: typeof stockfishModule?.addMessageListener === 'function',
+            hasPostMessage: typeof stockfishModule?.postMessage === 'function',
+            keys: stockfishModule ? Object.keys(stockfishModule).slice(0, 10) : []
+        });
+        
+        // The module should now be ready - check if methods exist
+        if (!stockfishModule || typeof stockfishModule.addMessageListener !== 'function') {
+            throw new Error('Stockfish module does not have addMessageListener method. Module: ' + JSON.stringify(Object.keys(stockfishModule || {})));
+        }
+        
+        stockfishEngine = stockfishModule;
+        
+        // Set up a single global message handler
+        stockfishEngine.addMessageListener((line) => {
+            const trimmedLine = line.trim();
+            console.log('[Bot] 📨 Stockfish message:', trimmedLine);
+            
+            // Handle bestmove responses
+            if (trimmedLine.startsWith('bestmove') && stockfishCallback) {
+                const parts = trimmedLine.split(/\s+/);
+                console.log('[Bot] 📊 Parsing bestmove, parts:', parts);
+                const callback = stockfishCallback;
+                stockfishCallback = null; // Clear callback
+                
+                if (parts.length > 1 && parts[1] !== 'none') {
+                    const bestMove = parts[1];
+                    console.log('[Bot] 🎯 Stockfish best move:', bestMove);
+                    callback(bestMove);
+                } else {
+                    // No legal moves (checkmate/stalemate)
+                    console.log('[Bot] ❌ No legal moves available');
+                    callback(null);
+                }
+            }
+        });
+        
+        // Configure Stockfish
+        stockfishEngine.postMessage('uci');
+        stockfishEngine.postMessage(`setoption name Skill Level value ${botLevel}`);
+        stockfishEngine.postMessage('isready');
+        
+        console.log('[Bot] ✅ Stockfish engine initialized');
+    } catch (error) {
+        console.error('[Bot] ❌ Error initializing Stockfish:', error);
+        stockfishEngine = null;
+    }
+}
+
+// Cleanup Stockfish engine
+function cleanupStockfish() {
+    if (stockfishEngine) {
+        console.log('[Bot] 🧹 Cleaning up Stockfish engine');
+        stockfishEngine.terminate();
+        stockfishEngine = null;
+    }
+}
+
+// Generate a move using Stockfish engine
+function generateStockfishMove(fen, callback) {
+    if (!stockfishEngine) {
+        console.error('[Bot] ❌ Stockfish engine not initialized');
+        callback(null);
+        return;
+    }
+    
+    // If there's already a pending request, cancel it with fallback
+    if (stockfishCallback) {
+        console.log('[Bot] ⚠️ Cancelling previous Stockfish request');
+        const oldCallback = stockfishCallback;
+        stockfishCallback = null;
+        // Fallback to random move for the old request
+        try {
+            const chess = new Chess(fen);
+            const moves = chess.moves({ verbose: true });
+            if (moves.length > 0) {
+                const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                let moveUci = randomMove.from + randomMove.to;
+                if (randomMove.promotion) {
+                    moveUci += randomMove.promotion.toLowerCase();
+                }
+                oldCallback(moveUci);
+            } else {
+                oldCallback(null);
+            }
+        } catch (error) {
+            oldCallback(null);
+        }
+    }
+    
+    console.log('[Bot] 🎮 Starting Stockfish analysis for FEN:', fen);
+    
+    // Set the callback for this request
+    stockfishCallback = callback;
+    
+    // Set position and start analysis
+    console.log('[Bot] 📤 Sending position to Stockfish');
+    stockfishEngine.postMessage(`position fen ${fen}`);
+    console.log('[Bot] 📤 Sending go command to Stockfish');
+    stockfishEngine.postMessage('go depth 10'); // Search to depth 10 for reasonable speed
+    
+    // Timeout fallback (in case Stockfish doesn't respond)
+    setTimeout(() => {
+        if (stockfishCallback === callback) {
+            // This request is still pending
+            stockfishCallback = null;
+            console.error('[Bot] ❌ Stockfish timeout after 5 seconds - falling back to random move');
+            // Fallback to random move
+            if (typeof Chess === 'undefined') {
+                console.error('[Bot] ❌ Chess.js not available for fallback');
+                callback(null);
+                return;
+            }
+            
+            try {
+                const chess = new Chess(fen);
+                const moves = chess.moves({ verbose: true });
+                if (moves.length > 0) {
+                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                    let moveUci = randomMove.from + randomMove.to;
+                    if (randomMove.promotion) {
+                        moveUci += randomMove.promotion.toLowerCase();
+                    }
+                    console.log('[Bot] 🎲 Using fallback random move:', moveUci);
+                    callback(moveUci);
+                } else {
+                    callback(null);
+                }
+            } catch (error) {
+                console.error('[Bot] ❌ Error in fallback move generation:', error);
+                callback(null);
+            }
+        }
+    }, 5000); // 5 second timeout
+}
+
+// Send bot move to server via bot WebSocket
+function sendBotMove(moveUci) {
+    if (!botWs || botWs.readyState !== WebSocket.OPEN) {
+        console.error('[Bot] ❌ Bot WebSocket not connected when trying to send move:', moveUci);
+        return;
+    }
+    
+    console.log('[Bot] 📤 Sending move to server:', moveUci);
+    botWs.send(JSON.stringify({
+        type: 'make_move',
+        move: moveUci
+    }));
+}
+
+// Called when bot receives game state - make move if it's bot's turn
+async function processBotGameState(message) {
+    console.log('[Bot] 🔍 Processing game state:', {
+        playAgainstBot,
+        botColor,
+        botThinking,
+        gameStarted: message.game_started,
+        isGameOver: message.is_game_over,
+        turn: message.turn,
+        fen: message.fen
+    });
+    
+    if (!playAgainstBot) {
+        console.log('[Bot] ⏭️ Skipping - bot mode not enabled');
+        return;
+    }
+    
+    if (!botColor) {
+        console.log('[Bot] ⏭️ Skipping - bot color not set yet');
+        return;
+    }
+    
+    // Check if game is started and it's bot's turn
+    if (!message.game_started) {
+        console.log('[Bot] ⏭️ Skipping - game not started');
+        return;
+    }
+    
+    if (message.is_game_over) {
+        console.log('[Bot] ⏭️ Skipping - game is over');
+        return;
+    }
+    
+    // Check if it's bot's turn (handle null/undefined turn)
+    if (!message.turn || message.turn !== botColor) {
+        console.log(`[Bot] ⏭️ Skipping - not bot's turn (turn: ${message.turn}, bot: ${botColor})`);
+        // If turn changed to opponent and bot was thinking, reset botThinking
+        // This handles cases where move_made message wasn't received
+        if (botThinking && message.turn !== botColor) {
+            console.log('[Bot] 🔄 Turn changed to opponent, resetting botThinking (safety check)');
+            botThinking = false;
+        }
+        // Update last processed turn only if it actually changed (not on every timer update)
+        if (lastProcessedTurn !== message.turn) {
+            lastProcessedTurn = message.turn;
+        }
+        return;
+    }
+    
+    // If it's bot's turn again and we were thinking, it means opponent moved
+    // Reset botThinking to allow processing the new turn
+    if (botThinking && message.turn === botColor && lastProcessedTurn !== message.turn) {
+        console.log('[Bot] 🔄 Turn changed back to bot (opponent moved), resetting botThinking');
+        botThinking = false;
+    }
+    
+    // Check if we've already processed this turn (avoid duplicate processing from timer updates)
+    // This prevents timer updates from interrupting Stockfish thinking
+    if (lastProcessedTurn === message.turn && botThinking) {
+        console.log(`[Bot] ⏭️ Skipping - already processing this turn (turn: ${message.turn})`);
+        return;
+    }
+    
+    if (botThinking) {
+        console.log('[Bot] ⏭️ Skipping - bot already thinking');
+        return;
+    }
+    
+    // Set botThinking flag
+    botThinking = true;
+    lastProcessedTurn = message.turn; // Track that we're processing this turn
+    
+    // Get FEN from game state
+    const fen = message.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    
+    console.log('[Bot] 🤖 Bot\'s turn! Getting Stockfish move for FEN:', fen);
+    
+    // Ensure Stockfish is initialized
+    if (!stockfishEngine) {
+        console.log('[Bot] 🔄 Stockfish not initialized, initializing now...');
+        await initializeStockfish();
+        // If initialization failed, use fallback
+        if (!stockfishEngine) {
+            console.error('[Bot] ❌ Stockfish initialization failed, using fallback');
+            botThinking = false;
+            // Fallback to random move
+            // Wait a bit for Chess.js to be available if it's still loading
+            let chessAvailable = typeof Chess !== 'undefined';
+            if (!chessAvailable) {
+                // Wait up to 1 second for Chess.js to load
+                for (let i = 0; i < 10; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    if (typeof Chess !== 'undefined') {
+                        chessAvailable = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!chessAvailable) {
+                console.error('[Bot] ❌ Chess.js not loaded - cannot generate fallback moves');
+                botThinking = false;
+                return;
+            }
+            
+            try {
+                const chess = new Chess(fen);
+                const moves = chess.moves({ verbose: true });
+                if (moves.length > 0) {
+                    const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                    let moveUci = randomMove.from + randomMove.to;
+                    if (randomMove.promotion) {
+                        moveUci += randomMove.promotion.toLowerCase();
+                    }
+                    sendBotMove(moveUci);
+                } else {
+                    botThinking = false;
+                }
+            } catch (error) {
+                console.error('[Bot] ❌ Error in fallback move generation:', error);
+                botThinking = false;
+            }
+            return;
+        }
+    }
+    
+    // Generate Stockfish move with a small delay to simulate thinking
+    setTimeout(async () => {
+        generateStockfishMove(fen, (move) => {
+            if (move) {
+                sendBotMove(move);
+                // Don't reset botThinking here - wait for server confirmation (move_made or error)
+            } else {
+                console.error('[Bot] ❌ Failed to generate move');
+                botThinking = false;
+            }
+        });
+    }, 300); // Small delay before starting analysis
+}
+
+function handleGameState(message) {
+    const wasGameStarted = gameStarted;
+    const previousGameId = currentGame;
+    
+    currentGame = message.game_id;
+    currentGameState = message; // Store game state for event handlers
+    
+    // Update spectator status
+    if (message.is_spectator !== undefined) {
+        isSpectator = message.is_spectator;
+    }
+    
+    // For spectators, use their view color instead of your_color
+    if (isSpectator) {
+        myColor = spectatorViewColor;
+    } else {
+        myColor = message.your_color;
+    }
+    
+    boardState = message.board || {};
+    gameStarted = message.game_started || false;
+    
+    // Update timer values
+    if (message.white_time_remaining !== undefined) {
+        whiteTimeRemaining = message.white_time_remaining;
+    }
+    if (message.black_time_remaining !== undefined) {
+        blackTimeRemaining = message.black_time_remaining;
+    }
+    lastTimeUpdate = Date.now();
+    
+    // Update timer display
+    updateTimerDisplay();
+    
+    // Show/hide timer displays based on game state
+    const playerTimer = document.getElementById('player-timer');
+    const opponentTimer = document.getElementById('opponent-timer');
+    if (playerTimer && opponentTimer) {
+        if (gameStarted && (whiteTimeRemaining !== null || blackTimeRemaining !== null)) {
+            playerTimer.style.display = 'inline';
+            opponentTimer.style.display = 'inline';
+        } else {
+            playerTimer.style.display = 'none';
+            opponentTimer.style.display = 'none';
+        }
+    }
+    
+    // Set up client-side countdown interval if game is started
+    if (gameStarted && !message.is_game_over) {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+        }
+        timerInterval = setInterval(() => {
+            updateTimerDisplay();
+        }, 100); // Update every 100ms for smooth countdown
+    } else {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+    }
+    // Track waiting_for_opponent flag for start button visibility
+    window.waitingForOpponent = message.waiting_for_opponent || false;
+    
+    // If waiting for opponent, poll for game state updates
+    if (window.waitingForOpponent && !gameStarted) {
+        // Clear any existing polling interval
+        if (window.gameStatePollInterval) {
+            clearInterval(window.gameStatePollInterval);
+        }
+        // Poll every 2 seconds for game state updates
+        window.gameStatePollInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN && currentGame && !gameStarted) {
+                ws.send(JSON.stringify({ type: 'get_game_state' }));
+            } else {
+                // Stop polling if disconnected or game started
+                if (window.gameStatePollInterval) {
+                    clearInterval(window.gameStatePollInterval);
+                    window.gameStatePollInterval = null;
+                }
+            }
+        }, 2000);
+    } else {
+        // Stop polling when opponent joins or game starts
+        if (window.gameStatePollInterval) {
+            clearInterval(window.gameStatePollInterval);
+            window.gameStatePollInterval = null;
+        }
+    }
+    // Track rematch state
+    window.canRematch = message.can_rematch || false;
+    window.rematchRequestedByOpponent = (message.rematch_requested_by && message.rematch_requested_by !== playerId) || false;
+    rematchRequested = (message.rematch_requested_by === playerId) || false;
+    rematchAccepted = (message.rematch_accepted_by === playerId) || false;
+    
+    // Play sound based on game state when NEW moves are detected
+    // Only play sounds if we're in an active game and not in lobby
+    const lobby = document.getElementById('lobby');
+    const isInLobby = lobby && lobby.style.display !== 'none';
+    
+    if (gameStarted && !isInLobby && message.move_history) {
+        const currentMoveCount = message.move_history.length;
+        const isNewMove = currentMoveCount > previousMoveCount;
+        
+        if (isNewMove) {
+            // Check for checkmate first - winner/loser sounds take highest priority
+            if (message.is_checkmate && !gameEndSoundPlayed) {
+                // Use result field if available (more reliable), otherwise infer from turn
+                if (message.result === '1-0') {
+                    // White wins
+                    if (myColor === 'white') {
+                        playSound('winner.mp3');
+                    } else if (myColor === 'black') {
+                        playSound('loser.mp3');
+                    }
+                } else if (message.result === '0-1') {
+                    // Black wins
+                    if (myColor === 'black') {
+                        playSound('winner.mp3');
+                    } else if (myColor === 'white') {
+                        playSound('loser.mp3');
+                    }
+                } else {
+                    // Fallback: determine who won based on whose turn it is
+                    // If it's white's turn and checkmate, black just won (white is in checkmate)
+                    // If it's black's turn and checkmate, white just won (black is in checkmate)
+                    const turn = message.turn;
+                    if (turn === 'white') {
+                        // White is in checkmate, black won
+                        if (myColor === 'black') {
+                            playSound('winner.mp3');
+                        } else if (myColor === 'white') {
+                            playSound('loser.mp3');
+                        }
+                    } else if (turn === 'black') {
+                        // Black is in checkmate, white won
+                        if (myColor === 'white') {
+                            playSound('winner.mp3');
+                        } else if (myColor === 'black') {
+                            playSound('loser.mp3');
+                        }
+                    }
+                }
+                gameEndSoundPlayed = true;
+            } else if (message.is_check) {
+                // Check sound takes priority over move sound (but not over checkmate)
+                playSound('check.mp3');
+            } else {
+                // Only play move sound for actual moves (not initial state)
+                playSound('move.mp3');
+            }
+        }
+        
+        // Update previous move count
+        previousMoveCount = currentMoveCount;
+    } else if (!gameStarted || isInLobby) {
+        // Reset move count when game ends or we're in lobby
+        previousMoveCount = 0;
+    }
+    
+    // Update room info
+    updateRoomInfo(message);
+    
+    // Ensure player name is still displayed (persist from lobby/previous updates)
+    if (playerName) {
+        updatePlayerNameDisplay(playerName);
+    }
+    
+    // Update opponent name display - for spectators, this is handled separately in render section
+    if (!isSpectator || !message.game_started) {
+        updateOpponentName(message.opponent_name);
+    }
+    
+    if (message.waiting_for_opponent) {
+        // For spectators, don't show "waiting for opponent" - they're just watching
+        if (isSpectator) {
+            if (gameStarted) {
+                // Game was in progress, now waiting - show appropriate message
+                updateGameStatus('A player left. Waiting for a new player to join...');
+            } else {
+                // Game hasn't started yet
+                updateGameStatus('Waiting for players to join...');
+            }
+        } else {
+            // For players, show waiting message
+            if (myColor) {
+                updateGameStatus(`Waiting for opponent... (You are ${myColor === 'white' ? 'White' : 'Black'})`);
+            } else {
+                updateGameStatus('Waiting for opponent...');
+            }
+        }
+        updateTurnStatus(null, null);
+        hideResultIndicators();
+    } else if (!gameStarted) {
+        // Both players joined but game hasn't started
+        if (isSpectator) {
+            // For spectators, show player names
+            const whiteName = message.white_player_name || 'White player';
+            const blackName = message.black_player_name || 'Black player';
+            const readyStatus = [];
+            if (message.white_ready) readyStatus.push(`${whiteName} ready`);
+            if (message.black_ready) readyStatus.push(`${blackName} ready`);
+            const statusText = readyStatus.length > 0 
+                ? `Waiting for ${whiteName} and ${blackName} to begin the game... (${readyStatus.join(', ')})`
+                : `Waiting for ${whiteName} and ${blackName} to begin the game...`;
+            updateGameStatus(statusText);
+        } else {
+            // For players, show ready status
+            const readyStatus = [];
+            if (message.white_ready) readyStatus.push('Player 1 ready');
+            if (message.black_ready) readyStatus.push('Player 2 ready');
+            const statusText = readyStatus.length > 0 
+                ? `Waiting for both players to start... (${readyStatus.join(', ')})`
+                : 'Press "Start Game" when ready. Colors will be assigned randomly.';
+            updateGameStatus(statusText);
+        }
+        updateTurnStatus(null, null);
+        hideResultIndicators();
+    } else {
+        // Game is in progress
+        let statusText = '';
+        
+        if (message.is_game_over) {
+            // Game is over - show result message with emojis
+            const result = message.result;
+            const resultReason = message.result_reason;
+            
+            // Prioritize server's personalized message if available
+            if (message.result_message) {
+                // Server message is already personalized for players/spectators
+                statusText = message.result_message;
+                
+                // Ensure game over type is shown if result_reason is available and not already in message
+                if (resultReason) {
+                    const reasonLower = resultReason.toLowerCase();
+                    const messageLower = statusText.toLowerCase();
+                    
+                    // Check if the reason is already mentioned in the message
+                    const reasonMentioned = messageLower.includes(reasonLower) || 
+                                          (reasonLower === 'checkmate' && messageLower.includes('checkmate')) ||
+                                          (reasonLower === 'stalemate' && messageLower.includes('stalemate')) ||
+                                          (reasonLower === 'insufficient_material' && (messageLower.includes('insufficient') || messageLower.includes('material')));
+                    
+                    if (!reasonMentioned) {
+                        // Add the reason to the message
+                        if (result === '1/2-1/2') {
+                            // For draws, replace generic "Draw" with specific reason
+                            if (reasonLower === 'stalemate') {
+                                statusText = statusText.replace(/draw/i, 'Draw by stalemate');
+                            } else if (reasonLower === 'insufficient_material') {
+                                statusText = statusText.replace(/draw/i, 'Draw by insufficient material');
+                            } else if (reasonLower) {
+                                statusText = statusText.replace(/draw/i, `Draw (${resultReason})`);
+                            }
+                        } else if ((result === '1-0' || result === '0-1') && reasonLower === 'checkmate') {
+                            // For wins, add "by checkmate" if not present
+                            if (!messageLower.includes('checkmate')) {
+                                statusText = statusText.replace(/\bwins?\b/i, (match) => match + ' by checkmate');
+                            }
+                        } else if (reasonLower) {
+                            // For other reasons, append in parentheses
+                            statusText = statusText + ` (${resultReason})`;
+                        }
+                    }
+                }
+                
+                // Add emoji based on result
+                if (result === '1/2-1/2') {
+                    if (resultReason === 'stalemate') {
+                        statusText = '🤷 ' + statusText;
+                    } else {
+                        statusText = '🤝 ' + statusText;
+                    }
+                } else if (result === '1-0' || result === '0-1') {
+                    // Check if message contains "You" to determine if player won
+                    if (statusText.toLowerCase().includes('you win')) {
+                        statusText = '🏆 ' + statusText;
+                    } else if (statusText.toLowerCase().includes('opponent wins') || statusText.toLowerCase().includes('you lose')) {
+                        statusText = '😞 ' + statusText;
+                    } else {
+                        // For spectators, check if it's a win message
+                        if (statusText.toLowerCase().includes('wins') || statusText.toLowerCase().includes('won')) {
+                            statusText = '🏆 ' + statusText;
+                        } else {
+                            statusText = '😞 ' + statusText;
+                        }
+                    }
+                }
+            } else if (result === '1/2-1/2') {
+                // Draw
+                if (resultReason === 'stalemate') {
+                    statusText = '🤷 Draw by stalemate';
+                } else if (resultReason === 'insufficient_material') {
+                    statusText = '🤝 Draw by insufficient material';
+                } else if (resultReason === 'draw_by_agreement') {
+                    statusText = '🤝 Draw by agreement';
+                } else {
+                    statusText = '🤝 Draw';
+                }
+            } else if (result === '1-0') {
+                // White wins
+                if (isSpectator) {
+                    // For spectators, show winner with trophy
+                    const winnerName = message.white_player_name || 'White';
+                    if (resultReason === 'checkmate') {
+                        statusText = `🏆 ${winnerName} wins by checkmate`;
+                    } else if (resultReason) {
+                        statusText = `🏆 ${winnerName} wins (${resultReason})`;
+                    } else {
+                        statusText = `🏆 ${winnerName} wins`;
+                    }
+                } else if (myColor === 'white') {
+                    // Player is white and won
+                    if (resultReason === 'checkmate') {
+                        statusText = '🏆 You won by checkmate!';
+                    } else if (resultReason) {
+                        statusText = `🏆 You won (${resultReason})!`;
+                    } else {
+                        statusText = '🏆 You won!';
+                    }
+                } else {
+                    // Player is black and lost
+                    if (resultReason === 'checkmate') {
+                        statusText = '😞 Opponent wins by checkmate';
+                    } else if (resultReason) {
+                        statusText = `😞 Opponent wins (${resultReason})`;
+                    } else {
+                        statusText = '😞 Opponent wins';
+                    }
+                }
+            } else if (result === '0-1') {
+                // Black wins
+                if (isSpectator) {
+                    // For spectators, show winner with trophy
+                    const winnerName = message.black_player_name || 'Black';
+                    if (resultReason === 'checkmate') {
+                        statusText = `🏆 ${winnerName} wins by checkmate`;
+                    } else if (resultReason) {
+                        statusText = `🏆 ${winnerName} wins (${resultReason})`;
+                    } else {
+                        statusText = `🏆 ${winnerName} wins`;
+                    }
+                } else if (myColor === 'black') {
+                    // Player is black and won
+                    if (resultReason === 'checkmate') {
+                        statusText = '🏆 You won by checkmate!';
+                    } else if (resultReason) {
+                        statusText = `🏆 You won (${resultReason})!`;
+                    } else {
+                        statusText = '🏆 You won!';
+                    }
+                } else {
+                    // Player is white and lost
+                    if (resultReason === 'checkmate') {
+                        statusText = '😞 Opponent wins by checkmate';
+                    } else if (resultReason) {
+                        statusText = `😞 Opponent wins (${resultReason})`;
+                    } else {
+                        statusText = '😞 Opponent wins';
+                    }
+                }
+            } else {
+                // Fallback
+                if (resultReason) {
+                    statusText = `Game Over: ${result} (${resultReason})`;
+                } else {
+                    statusText = `Game Over: ${result}`;
+                }
+            }
+            
+            updateTurnStatus(null, null); // Hide turn indicators when game is over
+            updateResultIndicators(message, myColor);
+            
+            // Play winner/loser sound (only if not already played and not a resignation)
+            // Resignations are handled by 'resignation' message to avoid duplicate sounds
+            if (!gameEndSoundPlayed && !message.resigned_by) {
+                if (result === '1-0') {
+                    if (myColor === 'white') {
+                        playSound('winner.mp3');
+                    } else {
+                        playSound('loser.mp3');
+                    }
+                } else if (result === '0-1') {
+                    if (myColor === 'black') {
+                        playSound('winner.mp3');
+                    } else {
+                        playSound('loser.mp3');
+                    }
+                }
+                gameEndSoundPlayed = true;
+            }
+            
+            // Don't start countdown, allow rematch
+            // Update rematch status display
+            if (isSpectator) {
+                // For spectators, show player names
+                if (message.rematch_requested_by) {
+                    let requesterName = 'A player';
+                    if (message.rematch_requested_by === message.white_player) {
+                        requesterName = message.white_player_name || 'White';
+                    } else if (message.rematch_requested_by === message.black_player) {
+                        requesterName = message.black_player_name || 'Black';
+                    }
+                    statusText += ` ${requesterName} requested rematch.`;
+                } else if (message.rematch_accepted_by) {
+                    let accepterName = 'A player';
+                    if (message.rematch_accepted_by === message.white_player) {
+                        accepterName = message.white_player_name || 'White';
+                    } else if (message.rematch_accepted_by === message.black_player) {
+                        accepterName = message.black_player_name || 'Black';
+                    }
+                    statusText += ` ${accepterName} accepted rematch.`;
+                }
+            } else {
+                if (message.rematch_requested_by && message.rematch_requested_by !== playerId) {
+                    statusText += ' Opponent requested rematch.';
+                } else if (message.rematch_accepted_by && message.rematch_accepted_by !== playerId) {
+                    statusText += ' Opponent accepted rematch.';
+                }
+            }
+        } else {
+            // Game is ongoing
+            const isMyTurn = message.turn === myColor;
+            
+            // For spectators, show player names instead of "Your turn"/"Opponent's turn"
+            let turnText;
+            if (isSpectator) {
+                if (message.turn === 'white') {
+                    const playerName = message.white_player_name || 'White';
+                    turnText = `${playerName}'s turn (white)`;
+                } else if (message.turn === 'black') {
+                    const playerName = message.black_player_name || 'Black';
+                    turnText = `${playerName}'s turn (black)`;
+                } else {
+                    turnText = "Waiting for turn...";
+                }
+            } else {
+                turnText = isMyTurn ? 'Your turn' : "Opponent's turn";
+            }
+            
+            // Update turn indicators
+            updateTurnStatus(message.turn, myColor);
+        
+            // Hide result indicators during game
+            hideResultIndicators();
+            
+            // Check for draw offer first
+            const drawOfferedBy = message.draw_offered_by;
+            if (drawOfferedBy != null) {
+                if (isSpectator) {
+                    // For spectators, show which player offered the draw
+                    let offererName = 'A player';
+                    if (drawOfferedBy === message.white_player) {
+                        offererName = message.white_player_name || 'White';
+                    } else if (drawOfferedBy === message.black_player) {
+                        offererName = message.black_player_name || 'Black';
+                    }
+                    statusText += `${offererName} offered a draw. (${turnText})`;
+                } else {
+                    if (drawOfferedBy === playerId) {
+                        statusText += `You offered a draw. Waiting for opponent... (${turnText})`;
+                    } else {
+                        statusText += `⚠️ Opponent offered a draw! Click "Accept Draw" to accept. (${turnText})`;
+                    }
+                }
+            } else if (message.is_check) {
+                // Check sound is already played when move is detected
+                if (isSpectator) {
+                    // For spectators, show which player is in check
+                    if (message.turn === 'white') {
+                        const playerName = message.white_player_name || 'White';
+                        statusText += `⚠️ ${playerName} (white) is in check. ${turnText}`;
+                    } else {
+                        const playerName = message.black_player_name || 'Black';
+                        statusText += `⚠️ ${playerName} (black) is in check. ${turnText}`;
+                    }
+                } else {
+                    if (isMyTurn) {
+                        statusText += `⚠️ You are in CHECK! ${turnText}`;
+                    } else {
+                        statusText += `⚠️ Opponent is in check. ${turnText}`;
+                    }
+                }
+            } else {
+                statusText += turnText;
+            }
+        }
+        
+        updateGameStatus(statusText);
+    }
+    
+    updatePromotionButton();
+    
+    // Update player names for spectators
+    if (isSpectator && message.game_started) {
+        // For spectators, show player names based on current view
+        // When viewing from white perspective: black above (opponent from white's view), white below (player from white's view)
+        // When viewing from black perspective: white above (opponent from black's view), black below (player from black's view)
+        const whiteName = message.white_player_name || 'White';
+        const blackName = message.black_player_name || 'Black';
+        const viewColor = spectatorViewColor || 'white';
+        
+        if (viewColor === 'white') {
+            // White view: black above (opponent), white below (player)
+            updateOpponentName(blackName);
+            updatePlayerNameDisplay(whiteName);
+        } else {
+            // Black view: white above (opponent), black below (player)
+            updateOpponentName(whiteName);
+            updatePlayerNameDisplay(blackName);
+        }
+    } else if (!isSpectator) {
+        // For players, use normal update
+        updateOpponentName(message.opponent_name);
+    }
+    
+    renderBoard();
+    updateStartButton();
+    updateGameControls(message);
+    updateSpectatorUI(message);
+    updateMoveNotation(message.move_san_history, message);
+    
+    // Re-setup drag and drop after board render
+    setupDragAndDrop();
+    
+    // Bot moves are handled in handleBotMessage, not here
+}
+
+function updateGameControls(message) {
+    const gameControlsTop = document.getElementById('game-controls-top');
+    const gameControls = document.getElementById('game-controls');
+    const offerDrawBtn = document.getElementById('offer-draw-btn');
+    const acceptDrawBtn = document.getElementById('accept-draw-btn');
+    const resignBtn = document.getElementById('resign-btn');
+    const promoBtn = document.getElementById('promotion-cycle-btn');
+    
+    // Always hide top controls if we're not in a game
+    // Note: myColor can be null before colors are assigned, so don't check it here
+    if (!currentGame) {
+        if (gameControlsTop) gameControlsTop.style.display = 'none';
+        if (gameControls) gameControls.style.display = 'none';
+        if (promoBtn) promoBtn.style.display = 'none';
+        return;
+    }
+    
+    // Show the game-controls-container (which contains start button) when in a game
+    const gameControlsContainer = document.getElementById('game-controls-container');
+    if (gameControlsContainer) {
+        gameControlsContainer.style.display = 'block';
+    }
+    
+    // Show top controls when in a game
+    if (gameControlsTop) {
+        gameControlsTop.style.display = 'block';
+    }
+    
+    // Hide top controls if game is over
+    if (message.is_game_over || message.resigned_by) {
+        if (gameControlsTop) {
+            gameControlsTop.style.display = 'none';
+        }
+        if (gameControls) gameControls.style.display = 'none';
+        return;
+    }
+    
+    // Hide all game action buttons for spectators
+    if (isSpectator) {
+        if (gameControlsTop) {
+            gameControlsTop.style.display = 'none';
+        }
+        if (promoBtn) promoBtn.style.display = 'none';
+        if (offerDrawBtn) offerDrawBtn.style.display = 'none';
+        if (acceptDrawBtn) acceptDrawBtn.style.display = 'none';
+        if (resignBtn) resignBtn.style.display = 'none';
+        return;
+    }
+    
+    // Hide buttons if game hasn't started yet
+    if (!gameStarted) {
+        if (gameControlsTop) {
+            gameControlsTop.style.display = 'none';
+        }
+        if (promoBtn) promoBtn.style.display = 'none';
+        if (offerDrawBtn) offerDrawBtn.style.display = 'none';
+        if (acceptDrawBtn) acceptDrawBtn.style.display = 'none';
+        if (resignBtn) resignBtn.style.display = 'none';
+        return;
+    }
+    
+    // Promotion toggle should be visible when game has started and it's not over
+    if (promoBtn) {
+        promoBtn.style.display = 'block';
+    }
+    
+    // Handle draw offer button
+    if (offerDrawBtn) {
+        const drawOfferedBy = message.draw_offered_by;
+        const hasDrawOfferFromMessage = drawOfferedBy != null; // Check for both null and undefined
+        const isMyOffer = drawOfferedBy === playerId;
+        const isOpponentOffer = hasDrawOfferFromMessage && !isMyOffer;
+        
+        // Check if draw offer state actually changed
+        const drawOfferStateChanged = previousDrawOfferedBy !== drawOfferedBy;
+        
+        // Update our tracking variable
+        hasDrawOffer = isMyOffer;
+        
+        if (message.is_game_over || message.resigned_by) {
+            offerDrawBtn.disabled = true;
+            offerDrawBtn.style.display = 'none';
+            resetDrawButton(); // Reset if game ended
+            hasDrawOffer = false;
+            previousDrawOfferedBy = null; // Reset tracking
+        } else if (isOpponentOffer) {
+            // Opponent offered draw - hide offer button, show accept button
+            // Only reset if state actually changed (not on every timer update)
+            if (drawOfferStateChanged) {
+                offerDrawBtn.style.display = 'none';
+                resetDrawButton(); // Reset button state only when state changes
+            }
+            hasDrawOffer = false;
+            if (acceptDrawBtn) {
+                acceptDrawBtn.style.display = 'block';
+                acceptDrawBtn.disabled = false;
+            }
+        } else {
+            // No draw offer or my offer
+            // Only update button properties if state changed OR button is not in confirmation mode
+            // This prevents timer updates from interfering with the "3", "2", "1" countdown
+            const shouldUpdateButton = drawOfferStateChanged || drawButtonClickCount === 0;
+            
+            if (shouldUpdateButton) {
+                offerDrawBtn.disabled = false;
+                offerDrawBtn.style.display = 'block';
+                
+                // Change button text based on whether we've offered
+                if (isMyOffer) {
+                    offerDrawBtn.textContent = 'Retract Draw';
+                    drawButtonOriginalText = 'Retract Draw';
+                } else {
+                    offerDrawBtn.textContent = 'Offer Draw';
+                    drawButtonOriginalText = 'Offer Draw';
+                }
+            }
+            
+            // Only reset button state if draw offer state actually changed (not on timer updates)
+            if (drawOfferStateChanged && drawButtonClickCount > 0) {
+                resetDrawButton();
+                // Restore text after reset
+                if (isMyOffer) {
+                    offerDrawBtn.textContent = 'Retract Draw';
+                    drawButtonOriginalText = 'Retract Draw';
+                } else {
+                    offerDrawBtn.textContent = 'Offer Draw';
+                    drawButtonOriginalText = 'Offer Draw';
+                }
+            }
+            
+            if (acceptDrawBtn) {
+                acceptDrawBtn.style.display = 'none';
+            }
+        }
+        
+        // Update previous state tracking
+        previousDrawOfferedBy = drawOfferedBy;
+    }
+    
+    // Handle resign button
+    if (resignBtn) {
+        if (message.is_game_over || message.resigned_by) {
+            resignBtn.disabled = true;
+            resignBtn.style.display = 'none';
+            resetResignButton(); // Reset if game ended
+        } else {
+            resignBtn.disabled = false;
+            resignBtn.style.display = 'block';
+            // Don't reset button confirmation state on timer updates
+            // Only reset when game actually ends (handled above)
+        }
+    }
+}
+
+let drawButtonClickCount = 0;
+let drawButtonOriginalText = '';
+let hasDrawOffer = false; // Track if we currently have a draw offer
+let drawButtonTimeout = null;
+let previousDrawOfferedBy = null; // Track previous draw offer state to detect changes
+
+function offerDraw() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentGame) {
+        updateGameStatus('Error: Not connected or not in a game');
+        return;
+    }
+    
+    const offerDrawBtn = document.getElementById('offer-draw-btn');
+    if (!offerDrawBtn) return;
+    
+    // Check if we already have a draw offer - if so, retract it immediately
+    if (hasDrawOffer || offerDrawBtn.textContent === 'Retract Draw' || offerDrawBtn.textContent.includes('Retract')) {
+        // Already offered - retract it immediately (no confirmation needed)
+        ws.send(JSON.stringify({ type: 'offer_draw' }));
+        resetDrawButton();
+        hasDrawOffer = false;
+        return;
+    }
+    
+    // Store original text on first click
+    if (drawButtonClickCount === 0) {
+        drawButtonOriginalText = offerDrawBtn.textContent || 'Offer Draw';
+    }
+    
+    drawButtonClickCount++;
+        
+    // Clear any existing timeout
+    if (drawButtonTimeout) {
+        clearTimeout(drawButtonTimeout);
+    }
+    
+    // Reset after 2 seconds of inactivity
+    drawButtonTimeout = setTimeout(() => {
+        resetDrawButton();
+    }, 2000);
+    
+    if (drawButtonClickCount === 1) {
+        offerDrawBtn.textContent = '2';
+        offerDrawBtn.classList.add('btn-warning');
+        offerDrawBtn.classList.remove('btn-info');
+    } else if (drawButtonClickCount === 2) {
+        offerDrawBtn.textContent = '1';
+        offerDrawBtn.classList.remove('btn-warning');
+        offerDrawBtn.classList.add('btn-danger');
+    } else if (drawButtonClickCount >= 3) {
+        // Confirm draw offer
+        if (ws && ws.readyState === WebSocket.OPEN && currentGame) {
+            ws.send(JSON.stringify({ type: 'offer_draw' }));
+        }
+        resetDrawButton();
+    }
+}
+
+function resetDrawButton() {
+    const offerDrawBtn = document.getElementById('offer-draw-btn');
+    if (offerDrawBtn) {
+        drawButtonClickCount = 0;
+        if (drawButtonTimeout) {
+            clearTimeout(drawButtonTimeout);
+            drawButtonTimeout = null;
+        }
+        // Don't reset text if we have a draw offer - let updateGameControls handle it
+        if (!hasDrawOffer) {
+            if (!drawButtonOriginalText) {
+                drawButtonOriginalText = 'Offer Draw';
+            }
+            offerDrawBtn.textContent = drawButtonOriginalText;
+        }
+        offerDrawBtn.classList.remove('btn-warning', 'btn-danger');
+        // Restore original button style if it was info
+        if (drawButtonOriginalText === 'Offer Draw') {
+            offerDrawBtn.classList.add('btn-info');
+        }
+    }
+}
+
+function acceptDraw() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentGame) {
+        updateGameStatus('Error: Not connected or not in a game');
+        return;
+    }
+    
+    ws.send(JSON.stringify({ type: 'accept_draw' }));
+    updateGameStatus('Accepting draw...');
+}
+
+let resignButtonClickCount = 0;
+let resignButtonOriginalText = '';
+let resignButtonTimeout = null;
+
+function resign() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentGame) return;
+    
+    const resignBtn = document.getElementById('resign-btn');
+    if (!resignBtn) return;
+    
+    // Store original text on first click
+    if (resignButtonClickCount === 0) {
+        resignButtonOriginalText = resignBtn.textContent || 'Resign';
+    }
+    
+    resignButtonClickCount++;
+        
+    // Clear any existing timeout
+    if (resignButtonTimeout) {
+        clearTimeout(resignButtonTimeout);
+    }
+    
+    // Reset after 2 seconds of inactivity
+    resignButtonTimeout = setTimeout(() => {
+        resetResignButton();
+    }, 2000);
+    
+    if (resignButtonClickCount === 1) {
+        resignBtn.textContent = '2';
+        resignBtn.classList.remove('btn-danger');
+        resignBtn.classList.add('btn-warning');
+    } else if (resignButtonClickCount === 2) {
+        resignBtn.textContent = '1';
+        resignBtn.classList.remove('btn-warning');
+        resignBtn.classList.add('btn-danger');
+    } else if (resignButtonClickCount >= 3) {
+        // Confirm resignation
+        if (ws && ws.readyState === WebSocket.OPEN && currentGame) {
+            ws.send(JSON.stringify({ type: 'resign' }));
+        }
+        resetResignButton();
+    }
+}
+
+function resetResignButton() {
+    const resignBtn = document.getElementById('resign-btn');
+    if (resignBtn) {
+        resignButtonClickCount = 0;
+        if (resignButtonTimeout) {
+            clearTimeout(resignButtonTimeout);
+            resignButtonTimeout = null;
+        }
+        if (!resignButtonOriginalText) {
+            resignButtonOriginalText = 'Resign';
+        }
+        resignBtn.textContent = resignButtonOriginalText;
+        resignBtn.classList.remove('btn-warning');
+        resignBtn.classList.add('btn-danger');
+    }
+}
+
+function leaveGame() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    
+    // Reset local state
+    currentGame = null;
+    myColor = null;
+    gameStarted = false;
+    iAmReady = false;
+    selectedSquare = null;
+    boardState = {};
+    
+    // Hide game controls
+    const gameControls = document.getElementById('game-controls');
+    if (gameControls) gameControls.style.display = 'none';
+    
+    // Reset resign button
+    resetResignButton();
+    resetDrawButton();
+    previousDrawOfferedBy = null; // Reset draw offer tracking
+    
+    // Send leave game message
+    ws.send(JSON.stringify({ type: 'leave_game' }));
+    
+    // Reset UI
+    updateGameStatus('Left game. Joining new game...');
+    updateTurnStatus(null, null);
+    
+    // Clear board
+    const squares = document.querySelectorAll('.square');
+    squares.forEach(square => {
+        square.innerHTML = '';
+        square.classList.remove('selected', 'valid-move');
+    });
+    
+    // Wait a bit for server to process leave, then rejoin queue
+    setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'join_queue' }));
+        }
+    }, 300);
+}
+
+function renderBoard() {
+    const squares = document.querySelectorAll('.square');
+    const chessboard = document.getElementById('chessboard');
+    
+    // Update square labels first (in case color changed)
+    updateSquareLabels();
+    
+    // Clear all pieces and highlights, but keep square labels
+    squares.forEach(square => {
+        // Keep square label when clearing
+        const label = square.querySelector('.square-label');
+        const labelText = label ? label.textContent : '';
+        
+        // Remove everything except label
+        square.innerHTML = '';
+        if (label) {
+            label.textContent = labelText;
+            square.appendChild(label);
+        }
+        
+        square.classList.remove('selected', 'valid-move');
+        // Spectators should not have pointer cursor on squares
+        if (isSpectator) {
+            square.style.cursor = 'default';
+            square.style.pointerEvents = 'none';
+        } else {
+            square.style.cursor = 'pointer';
+            square.style.pointerEvents = '';
+        }
+    });
+    
+    if (chessboard) {
+        chessboard.style.cursor = '';
+    }
+    
+    // Render pieces
+    if (!boardState || typeof boardState !== 'object') {
+        console.warn('Invalid boardState:', boardState);
+        boardState = {};
+    }
+    Object.keys(boardState).forEach(squareName => {
+        const piece = boardState[squareName];
+        if (piece) {
+            const square = getSquareElement(squareName);
+            if (square) {
+                // Preserve square label
+                const label = square.querySelector('.square-label');
+                
+                const typeKey = (piece.type || '').toString();
+                const imageSrc = pieceImageUrls[typeKey]
+                    || pieceImageUrls[typeKey.toUpperCase?.() ? typeKey.toUpperCase() : typeKey]
+                    || pieceImageUrls[typeKey.toLowerCase?.() ? typeKey.toLowerCase() : typeKey];
+                if (imageSrc) {
+                    const img = document.createElement('img');
+                    img.src = imageSrc; // This will be a base64 data URI or static URL (fallback)
+                    img.alt = typeKey;
+                    img.className = 'piece piece-img';
+                    // No need for lazy loading with base64 - images are already in memory
+                    img.onerror = () => { 
+                        // On error, restore label if it exists
+                        if (label) {
+                            square.innerHTML = '';
+                            square.appendChild(label);
+                        }
+                    };
+                    
+                    // Clear and add both piece and label
+                    square.innerHTML = '';
+                    square.appendChild(img);
+                    if (label) {
+                        square.appendChild(label);
+                    }
+                    
+                    // Make square draggable if it's the player's piece (not for spectators)
+                    if (!isSpectator && piece.color === myColor && gameStarted) {
+                        square.draggable = true;
+                        square.dataset.pieceSquare = squareName; // Store square name for drag
+                    } else {
+                        square.draggable = false;
+                    }
+                } else {
+                    // No known source for this piece type; restore label
+                    square.innerHTML = '';
+                    if (label) {
+                        square.appendChild(label);
+                    }
+                }
+            }
+        }
+    });
+    
+    // Highlight selected square
+    if (selectedSquare) {
+        const square = getSquareElement(selectedSquare);
+        if (square) {
+            square.classList.add('selected');
+        }
+    }
+    
+    // Highlight valid moves
+    validMoves.forEach(squareName => {
+        const square = getSquareElement(squareName);
+        if (square) {
+            square.classList.add('valid-move');
+        }
+    });
+}
+
+function getSquareElement(squareName) {
+    // Convert square name (e.g., 'e4') to row/col
+    const file = squareName[0].charCodeAt(0) - 'a'.charCodeAt(0);
+    const rank = parseInt(squareName[1]) - 1;
+    
+    // For spectators, use their view color; for players, use their actual color
+    const viewColor = isSpectator ? spectatorViewColor : myColor;
+    
+    // Invert for black view (if color assigned, otherwise show normal view)
+    let row, col;
+    if (viewColor === 'black') {
+        row = 7 - rank;
+        col = 7 - file;
+    } else {
+        row = rank;
+        col = file;
+    }
+    
+    // Invert row (chessboard is displayed with rank 8 at top)
+    row = 7 - row;
+    
+    return document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+}
+
+function getSquareName(row, col) {
+    // Convert row/col to square name
+    // Invert row (chessboard is displayed with rank 8 at top)
+    let displayRow = 7 - row;
+    let displayCol = col;
+    
+    // For spectators, use their view color; for players, use their actual color
+    const viewColor = isSpectator ? spectatorViewColor : myColor;
+    
+    // Invert for black view (if color assigned, otherwise use normal view)
+    if (viewColor === 'black') {
+        displayRow = 7 - displayRow;
+        displayCol = 7 - displayCol;
+    }
+    
+    const file = String.fromCharCode('a'.charCodeAt(0) + displayCol);
+    const rank = displayRow + 1;
+    return file + rank;
+}
+
+function updateSquareLabels() {
+    // Update square labels based on current player color
+    const squares = document.querySelectorAll('.square');
+    
+    squares.forEach(square => {
+        const row = parseInt(square.dataset.row);
+        const col = parseInt(square.dataset.col);
+        const squareName = getSquareName(row, col);
+        
+        // Find or create label element
+        let label = square.querySelector('.square-label');
+        if (!label) {
+            label = document.createElement('span');
+            label.className = 'square-label';
+            square.appendChild(label);
+        }
+        
+        // Set label text
+        label.textContent = squareName;
+    });
+}
+
+function handleSquareClick(row, col) {
+    if (!currentGame) return;
+    
+    // Spectators can't make moves
+    if (isSpectator) {
+        return;
+    }
+    
+    // Don't allow moves if color not assigned yet
+    if (!myColor) {
+        updateGameStatus('Colors not assigned yet. Please wait for both players to be ready.');
+        return;
+    }
+    
+    // Don't allow moves if game hasn't started
+    if (!gameStarted) {
+        return;
+    }
+    
+    const squareName = getSquareName(row, col);
+    const square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+    
+    // Check if it's player's turn - we'll rely on the game state message for turn validation
+    // The server will reject moves if it's not the player's turn
+    
+    // If no square selected, select this square if it has a piece of player's color
+    if (!selectedSquare) {
+        const piece = boardState[squareName];
+        if (piece && piece.color === myColor) {
+            selectedSquare = squareName;
+            validMoves = []; // Clear previous valid moves
+            // Request legal moves from server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'get_legal_moves',
+                    square: squareName
+                }));
+            }
+            renderBoard();
+        }
+    } else {
+        // Check if clicking on a valid move square
+        if (validMoves.includes(squareName)) {
+            // Try to make a move
+            let move = selectedSquare + squareName;
+            
+            // Check if this is a pawn promotion
+            const fromPiece = boardState[selectedSquare];
+            if (fromPiece) {
+                const pieceType = fromPiece.type.toUpperCase();
+                const isPawn = pieceType === 'P';
+                const targetRank = parseInt(squareName[1]);
+                
+                // Pawn promotion: white pawn to rank 8, or black pawn to rank 1
+                if (isPawn && ((myColor === 'white' && targetRank === 8) || (myColor === 'black' && targetRank === 1))) {
+                    move = move + currentPromotionLetter();
+                }
+            }
+            
+            ws.send(JSON.stringify({
+                type: 'make_move',
+                move: move
+            }));
+            selectedSquare = null;
+            validMoves = [];
+            renderBoard();
+        } else {
+            // Clicked on a different square - either select new piece or deselect
+            const piece = boardState[squareName];
+            if (piece && piece.color === myColor) {
+                // Select new piece
+                selectedSquare = squareName;
+                validMoves = [];
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'get_legal_moves',
+                        square: squareName
+                    }));
+                }
+                renderBoard();
+            } else {
+                // Deselect
+                selectedSquare = null;
+                validMoves = [];
+                renderBoard();
+            }
+        }
+    }
+}
+
+// Drag and drop handlers
+function handleDragStart(e, squareName) {
+    if (!currentGame || !gameStarted || !myColor || isSpectator) {
+        e.preventDefault();
+        if (isSpectator) {
+            return; // Spectators can't drag pieces
+        }
+        if (!myColor) {
+            updateGameStatus('Colors not assigned yet. Please wait for both players to be ready.');
+        }
+        return;
+    }
+    
+    const piece = boardState[squareName];
+    if (!piece || piece.color !== myColor) {
+        e.preventDefault();
+        return;
+    }
+    
+    draggedPiece = piece;
+    dragStartSquare = squareName;
+    selectedSquare = squareName;
+    validMoves = [];
+    
+    // Request legal moves
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'get_legal_moves',
+            square: squareName
+        }));
+    }
+    
+    // Set drag image
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', squareName);
+    
+    // Make piece semi-transparent while dragging
+    const square = e.currentTarget;
+    if (square) {
+        square.style.opacity = '0.5';
+    }
+    
+    renderBoard();
+}
+
+function handleDragEnd(e) {
+    e.target.style.opacity = '1';
+    draggedPiece = null;
+    dragStartSquare = null;
+}
+
+// Add drop handlers to squares
+function setupDragAndDrop() {
+    const squares = document.querySelectorAll('.square');
+    squares.forEach(square => {
+        // Remove old listeners if any
+        square.removeEventListener('dragover', handleDragOver);
+        square.removeEventListener('drop', handleDrop);
+        square.removeEventListener('dragenter', handleDragEnter);
+        square.removeEventListener('dragleave', handleDragLeave);
+        square.removeEventListener('dragstart', handleSquareDragStart);
+        square.removeEventListener('dragend', handleSquareDragEnd);
+        
+        // Add new listeners
+        square.addEventListener('dragover', handleDragOver);
+        square.addEventListener('drop', handleDrop);
+        square.addEventListener('dragenter', handleDragEnter);
+        square.addEventListener('dragleave', handleDragLeave);
+        
+        // Add drag start/end to draggable squares
+        if (square.draggable) {
+            square.addEventListener('dragstart', handleSquareDragStart);
+            square.addEventListener('dragend', handleSquareDragEnd);
+        }
+    });
+}
+
+function handleSquareDragStart(e) {
+    const squareName = e.currentTarget.dataset.pieceSquare;
+    if (!squareName) return;
+    
+    handleDragStart(e, squareName);
+}
+
+function handleSquareDragEnd(e) {
+    e.currentTarget.style.opacity = '1';
+    handleDragEnd(e);
+}
+
+function handleDragOver(e) {
+    // Spectators cannot drag pieces
+    if (isSpectator) {
+        return;
+    }
+    
+    if (draggedPiece && dragStartSquare) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+}
+
+function handleDragEnter(e) {
+    // Spectators cannot drag pieces
+    if (isSpectator) {
+        return;
+    }
+    
+    if (draggedPiece && dragStartSquare) {
+        e.preventDefault();
+        const row = parseInt(e.currentTarget.dataset.row);
+        const col = parseInt(e.currentTarget.dataset.col);
+        const squareName = getSquareName(row, col);
+        
+        if (validMoves.includes(squareName)) {
+            e.currentTarget.classList.add('drag-over-valid');
+        }
+    }
+}
+
+function handleDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over-valid');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over-valid');
+    
+    // Spectators cannot drop pieces
+    if (isSpectator) {
+        return;
+    }
+    
+    if (!draggedPiece || !dragStartSquare) return;
+    
+    const row = parseInt(e.currentTarget.dataset.row);
+    const col = parseInt(e.currentTarget.dataset.col);
+    const squareName = getSquareName(row, col);
+    
+    // Check if this is a valid move
+    if (validMoves.includes(squareName)) {
+        let move = dragStartSquare + squareName;
+        
+        // Check if this is a pawn promotion
+        const fromPiece = boardState[dragStartSquare];
+        if (fromPiece) {
+            const pieceType = fromPiece.type.toUpperCase();
+            const isPawn = pieceType === 'P';
+            const targetRank = parseInt(squareName[1]);
+            
+            // Pawn promotion: white pawn to rank 8, or black pawn to rank 1
+            if (isPawn && ((myColor === 'white' && targetRank === 8) || (myColor === 'black' && targetRank === 1))) {
+                move = move + currentPromotionLetter();
+            }
+        }
+        
+        ws.send(JSON.stringify({
+            type: 'make_move',
+            move: move
+        }));
+        
+        selectedSquare = null;
+        validMoves = [];
+        draggedPiece = null;
+        dragStartSquare = null;
+        renderBoard();
+    }
+}
+
+function startGame() {
+    const startBtn = document.getElementById('start-game-btn');
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected to server. Please wait...');
+        if (startBtn) startBtn.disabled = true;
+        return;
+    }
+    
+    if (!currentGame) {
+        alert('Not in a game yet. Please wait...');
+        return;
+    }
+    
+    if (iAmReady) {
+        // Already ready, do nothing
+        return;
+    }
+    
+    // Send player ready message
+    ws.send(JSON.stringify({ type: 'player_ready' }));
+    iAmReady = true;
+    
+    // Update button state
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Waiting for opponent...';
+    }
+    
+    console.log('Start game button clicked - sending player_ready message');
+}
+
+function requestRematch() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentGame) {
+        updateGameStatus('Error: Not connected or not in a game');
+        return;
+    }
+    
+    const startBtn = document.getElementById('start-game-btn');
+    if (!startBtn) return;
+    
+    // Store original text on first click
+    if (rematchButtonClickCount === 0) {
+        rematchButtonOriginalText = startBtn.textContent || 'Rematch';
+    }
+    
+    rematchButtonClickCount++;
+    
+    // Clear any existing timeout
+    if (rematchButtonTimeout) {
+        clearTimeout(rematchButtonTimeout);
+    }
+    
+    // Reset after 2 seconds of inactivity
+    rematchButtonTimeout = setTimeout(() => {
+        resetRematchButton();
+    }, 2000);
+    
+    if (rematchButtonClickCount === 1) {
+        startBtn.textContent = '2';
+        startBtn.classList.add('btn-warning');
+    } else if (rematchButtonClickCount === 2) {
+        startBtn.textContent = '1';
+        startBtn.classList.remove('btn-warning');
+        startBtn.classList.add('btn-danger');
+    } else if (rematchButtonClickCount >= 3) {
+        // Confirm rematch request
+        if (ws && ws.readyState === WebSocket.OPEN && currentGame) {
+            ws.send(JSON.stringify({ type: 'request_rematch' }));
+            rematchRequested = true;
+            updateGameStatus('Rematch requested. Waiting for opponent...');
+        }
+        resetRematchButton();
+    }
+}
+
+function acceptRematch() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentGame) {
+        updateGameStatus('Error: Not connected or not in a game');
+        return;
+    }
+    
+    ws.send(JSON.stringify({ type: 'accept_rematch' }));
+    rematchAccepted = true;
+    updateGameStatus('Rematch accepted. Waiting for both players...');
+    updateStartButton();
+}
+
+function resetRematchButton() {
+    const startBtn = document.getElementById('start-game-btn');
+    if (startBtn) {
+        rematchButtonClickCount = 0;
+        if (rematchButtonTimeout) {
+            clearTimeout(rematchButtonTimeout);
+            rematchButtonTimeout = null;
+        }
+        if (!rematchButtonOriginalText) {
+            rematchButtonOriginalText = 'Rematch';
+        }
+        startBtn.textContent = rematchButtonOriginalText;
+        startBtn.classList.remove('btn-warning', 'btn-danger');
+    }
+}
+
+function updateStartButton() {
+    const startBtn = document.getElementById('start-game-btn');
+    if (!startBtn) return;
+    
+    // Spectators should never see the start game button
+    if (isSpectator) {
+        startBtn.style.display = 'none';
+        return;
+    }
+    
+    if (!currentGame) {
+        startBtn.style.display = 'none';
+        return;
+    }
+    
+    // Check if we can rematch (game is over and rematch available)
+    // This is set in handleGameState via can_rematch flag
+    if (window.canRematch === true) {
+        startBtn.style.display = 'block';
+        startBtn.disabled = false;
+        
+        // Check rematch state
+        if (rematchRequested && rematchAccepted) {
+            // Both accepted - button should say "Start Game" (rematch is starting)
+            startBtn.textContent = 'Start Game';
+            startBtn.disabled = true;
+        } else if (rematchRequested) {
+            // We requested, waiting for opponent
+            startBtn.textContent = 'Waiting for opponent...';
+            startBtn.disabled = true;
+        } else if (window.rematchRequestedByOpponent === true) {
+            // Opponent requested, we can accept
+            startBtn.textContent = 'Accept Rematch';
+            startBtn.disabled = false;
+            startBtn.onclick = acceptRematch;
+        } else {
+            // No rematch requested yet - show rematch button
+            startBtn.textContent = 'Rematch';
+            startBtn.disabled = false;
+            startBtn.onclick = requestRematch;
+        }
+        return;
+    }
+    
+    // Don't require myColor to be set - colors may not be assigned yet
+    
+    // Hide button when game is started
+    if (gameStarted) {
+        startBtn.style.display = 'none';
+        return;
+    }
+    
+    // Check if we have a game state with waiting_for_opponent flag
+    // This is set in handleGameState - we'll use a global flag
+    // Only hide if explicitly set to true (not undefined/null)
+    if (window.waitingForOpponent === true) {
+        startBtn.style.display = 'none';
+        return;
+    }
+    
+    // Both players are present - show button
+    startBtn.style.display = 'block';
+    startBtn.onclick = startGame; // Reset to normal start game handler
+    
+    if (iAmReady) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Waiting for opponent...';
+    } else {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Game';
+    }
+}
+
+function currentPromotionLetter() {
+    const btn = document.getElementById('promotion-cycle-btn');
+    if (btn?.dataset?.promotion) {
+        return btn.dataset.promotion;
+    }
+    return promotionChoices[promotionIndex] || 'q';
+}
+
+function promotionLabel(letter) {
+    switch (letter) {
+        case 'q': return 'Queen';
+        case 'n': return 'Knight';
+        case 'r': return 'Rook';
+        case 'b': return 'Bishop';
+        default: return letter.toUpperCase();
+    }
+}
+
+function updatePromotionButton() {
+    const btn = document.getElementById('promotion-cycle-btn');
+    if (!btn) return;
+    if (!currentGame || !myColor || !gameStarted) {
+        btn.style.display = 'none';
+        return;
+    }
+    const letter = promotionChoices[promotionIndex] || 'q';
+    btn.dataset.promotion = letter;
+    btn.style.display = 'inline-block';
+    
+    // Clear button content
+    btn.textContent = '';
+    
+    // Get the piece key based on player color
+    // For white: Q, N, R, B (uppercase)
+    // For black: q, n, r, b (lowercase)
+    const pieceKey = myColor === 'white' ? letter.toUpperCase() : letter.toLowerCase();
+    const imageSrc = pieceImageUrls[pieceKey];
+    
+    if (imageSrc) {
+        // Remove any existing image
+        const existingImg = btn.querySelector('img');
+        if (existingImg) {
+            existingImg.remove();
+        }
+        
+        // Create and add the piece image
+        const img = document.createElement('img');
+        img.src = imageSrc;
+        img.alt = promotionLabel(letter);
+        img.className = 'promotion-piece-img';
+        img.style.width = '24px';
+        img.style.height = '24px';
+        img.style.verticalAlign = 'middle';
+        btn.appendChild(img);
+    } else {
+        // Fallback to text if image not available
+        btn.textContent = `Promote: ${promotionLabel(letter)}`;
+    }
+    
+    // Remove old color classes if not using gray style
+    if (!btn.classList.contains('btn-gray')) {
+        btn.classList.remove('white', 'black');
+        if (myColor) {
+            btn.classList.add(myColor === 'black' ? 'black' : 'white');
+        }
+    }
+}
+
+function cyclePromotionChoice() {
+    promotionIndex = (promotionIndex + 1) % promotionChoices.length;
+    updatePromotionButton();
+}
+
+function updateGameStatus(status) {
+    const statusText = document.getElementById('game-status-text');
+    if (statusText) {
+        statusText.textContent = status;
+        // Show status text when in a game
+        if (currentGame) {
+            statusText.style.display = 'block';
+        }
+    }
+}
+
+function startCountdownToLobby(seconds) {
+    // Don't start if already counting down or if we're in lobby
+    if (countdownTimer || !currentGame) {
+        return;
+    }
+    
+    let remaining = seconds;
+    let countdownInterval = null;
+    
+    // Show result message for 2 seconds, then start countdown
+    const countdownTimeout = setTimeout(() => {
+        // Check again if we're still in a game before starting countdown
+        if (!currentGame) {
+            stopCountdown();
+            return;
+        }
+        
+        updateGameStatus(`Returning to lobby in ${remaining}...`);
+        
+        countdownInterval = setInterval(() => {
+            // Check if we're still in a game
+            if (!currentGame) {
+                stopCountdown();
+                return;
+            }
+            
+            remaining--;
+            
+            if (remaining > 0) {
+                updateGameStatus(`Returning to lobby in ${remaining}...`);
+            } else {
+                // Fallback: if server kick is delayed or missed, force-return to lobby here
+                updateGameStatus('Returning to lobby...');
+                showLobby();
+                updateTurnStatus(null, null);
+                hideResultIndicators();
+                selectedSquare = null;
+                boardState = {};
+                currentGame = null;
+                gameStarted = false;
+                iAmReady = false;
+                updateStartButton();
+                resetResignButton();
+                resetDrawButton();
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'get_lobby_status' }));
+                }
+                stopCountdown();
+            }
+        }, 1000);
+        
+        // Update the countdownTimer object with the interval
+        if (countdownTimer && typeof countdownTimer === 'object') {
+            countdownTimer.interval = countdownInterval;
+        }
+    }, 2000); // Show result for 2 seconds, then start countdown
+    
+    // Store the timeout so we can clear it if needed
+    countdownTimer = { timeout: countdownTimeout, interval: null };
+}
+
+function stopCountdown() {
+    if (countdownTimer) {
+        // Handle both timeout and interval
+        if (countdownTimer.timeout) {
+            clearTimeout(countdownTimer.timeout);
+        }
+        if (countdownTimer.interval) {
+            clearInterval(countdownTimer.interval);
+        }
+        if (typeof countdownTimer === 'number') {
+            // Legacy: if it's just an interval ID
+            clearInterval(countdownTimer);
+        }
+        countdownTimer = null;
+    }
+}
+
+function updateTurnStatus(turn, myColor) {
+    const playerTurnIndicator = document.getElementById('player-turn-indicator');
+    const opponentTurnIndicator = document.getElementById('opponent-turn-indicator');
+    
+    if (!turn || !myColor) {
+        // Hide indicators when no turn info
+        if (playerTurnIndicator) playerTurnIndicator.style.display = 'none';
+        if (opponentTurnIndicator) opponentTurnIndicator.style.display = 'none';
+        return;
+    }
+    
+    const isMyTurn = turn === myColor;
+    
+    // Show tiny green dot for the player whose turn it is
+    if (playerTurnIndicator) {
+        if (isMyTurn) {
+            playerTurnIndicator.textContent = ''; // Empty text, CSS will show the dot
+            playerTurnIndicator.className = 'turn-indicator-dot';
+            playerTurnIndicator.style.display = 'inline-block';
+        } else {
+            playerTurnIndicator.style.display = 'none';
+        }
+    }
+    
+    if (opponentTurnIndicator) {
+        if (!isMyTurn) {
+            opponentTurnIndicator.textContent = ''; // Empty text, CSS will show the dot
+            opponentTurnIndicator.className = 'turn-indicator-dot';
+            opponentTurnIndicator.style.display = 'inline-block';
+        } else {
+            opponentTurnIndicator.style.display = 'none';
+        }
+    }
+}
+
+function updateResultIndicators(message, myColor) {
+    const playerResultIndicator = document.getElementById('player-result-indicator');
+    const opponentResultIndicator = document.getElementById('opponent-result-indicator');
+    
+    if (!message.is_game_over) {
+        hideResultIndicators();
+        return;
+    }
+    
+    const result = message.result;
+    const resultReason = message.result_reason;
+    const resignedBy = message.resigned_by;
+    const acceptDrawCalled = message.accept_draw_called;
+    
+    // Determine player's result
+    let playerEmoji = '';
+    let opponentEmoji = '';
+    
+    if (resignedBy) {
+        // Resignation
+        if (resignedBy === playerId) {
+            // Player resigned
+            playerEmoji = '🏳️';
+            opponentEmoji = '🏆';
+        } else {
+            // Opponent resigned
+            playerEmoji = '🏆';
+            opponentEmoji = '🏳️';
+        }
+    } else if (acceptDrawCalled || result === '1/2-1/2') {
+        // Draw
+        if (resultReason === 'stalemate') {
+            playerEmoji = '🤷';
+            opponentEmoji = '🤷';
+        } else {
+            playerEmoji = '🤝';
+            opponentEmoji = '🤝';
+        }
+    } else if (result === '1-0') {
+        // White wins
+        if (myColor === 'white') {
+            playerEmoji = '🏆';
+            opponentEmoji = '😞';
+        } else {
+            playerEmoji = '😞';
+            opponentEmoji = '🏆';
+        }
+    } else if (result === '0-1') {
+        // Black wins
+        if (myColor === 'black') {
+            playerEmoji = '🏆';
+            opponentEmoji = '😞';
+        } else {
+            playerEmoji = '😞';
+            opponentEmoji = '🏆';
+        }
+    }
+    
+    // Update indicators
+    if (playerResultIndicator && playerEmoji) {
+        playerResultIndicator.textContent = playerEmoji;
+        playerResultIndicator.style.display = 'inline';
+    }
+    
+    if (opponentResultIndicator && opponentEmoji) {
+        opponentResultIndicator.textContent = opponentEmoji;
+        opponentResultIndicator.style.display = 'inline';
+    }
+}
+
+function hideResultIndicators() {
+    const playerResultIndicator = document.getElementById('player-result-indicator');
+    const opponentResultIndicator = document.getElementById('opponent-result-indicator');
+    
+    if (playerResultIndicator) {
+        playerResultIndicator.style.display = 'none';
+    }
+    if (opponentResultIndicator) {
+        opponentResultIndicator.style.display = 'none';
+    }
+}
+
+function updatePlayerNameDisplay(nameValue) {
+    const playerNameBoardText = document.getElementById('player-name-board-text');
+    const playerNameDisplay = document.getElementById('player-name-display');
+    
+    console.log('updatePlayerNameDisplay called with:', nameValue);
+    if (nameValue) {
+        // Update board display
+        if (playerNameBoardText) {
+            playerNameBoardText.textContent = nameValue;
+        }
+        // Show player name below board when in a game
+        if (playerNameDisplay && currentGame) {
+            playerNameDisplay.style.display = 'block';
+        }
+        
+        console.log('Player name set to:', nameValue);
+    } else {
+        console.log('Failed to update player name - value:', nameValue);
+    }
+}
+
+function updateOpponentName(opponentName) {
+    const opponentNameBoardText = document.getElementById('opponent-name-board-text');
+    const opponentNameDisplay = document.getElementById('opponent-name-display');
+    
+    if (opponentName && currentGame) {
+        // Update board display (above board)
+        if (opponentNameBoardText) {
+            opponentNameBoardText.textContent = opponentName;
+        }
+        if (opponentNameDisplay) {
+            opponentNameDisplay.style.display = 'block';
+        }
+    } else {
+        // Hide opponent name when not in a game
+        if (opponentNameDisplay) {
+            opponentNameDisplay.style.display = 'none';
+        }
+        if (opponentNameBoardText) {
+            opponentNameBoardText.textContent = '-';
+        }
+    }
+}
+
+function updateRoomInfo(message) {
+    if (message.room_id) {
+        // Update URL with room ID
+        const roomId = message.room_id;
+        const newUrl = `${window.location.pathname}?room=${roomId}`;
+        window.history.pushState({ room: roomId }, '', newUrl);
+        console.log('Room ID set in URL:', roomId);
+    } else {
+        // Clear room from URL when no room_id (game ended, in lobby, etc.)
+        const newUrl = window.location.pathname;
+        window.history.pushState({}, '', newUrl);
+        console.log('Room ID cleared from URL');
+    }
+}
+
+function updateSpectatorUI(message) {
+    const spectatorControls = document.getElementById('spectator-controls');
+    const spectatorCountDisplay = document.getElementById('spectator-count-display');
+    
+    if (isSpectator) {
+        // Show spectator controls
+        if (spectatorControls) {
+            spectatorControls.style.display = 'flex';
+        }
+        
+        // Update spectator count display
+        const spectatorCount = message.spectator_count || 0;
+        if (spectatorCountDisplay) {
+            spectatorCountDisplay.textContent = `👁️ ${spectatorCount} spectator${spectatorCount !== 1 ? 's' : ''}`;
+            spectatorCountDisplay.style.display = 'block';
+        }
+    } else {
+        // Hide spectator controls
+        if (spectatorControls) {
+            spectatorControls.style.display = 'none';
+        }
+        
+        // Show spectator count if there are any
+        const spectatorCount = message.spectator_count || 0;
+        if (spectatorCountDisplay) {
+            if (spectatorCount > 0) {
+                spectatorCountDisplay.textContent = `👁️ ${spectatorCount} spectator${spectatorCount !== 1 ? 's' : ''}`;
+                spectatorCountDisplay.style.display = 'block';
+            } else {
+                spectatorCountDisplay.style.display = 'none';
+            }
+        }
+    }
+}
+
+function returnToLobby() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        updateGameStatus('Error: Not connected');
+        return;
+    }
+    
+    // Send leave game message (same as regular players)
+    ws.send(JSON.stringify({ type: 'leave_game' }));
+}
+
+function flipSpectatorView() {
+    if (!isSpectator) return;
+    
+    // Toggle between white and black view
+    spectatorViewColor = spectatorViewColor === 'white' ? 'black' : 'white';
+    
+    // Update the board view
+    updateSquareLabels();
+    renderBoard();
+    
+    // Update player names for the new view
+    if (currentGameState && currentGameState.game_started) {
+        const whiteName = currentGameState.white_player_name || 'White';
+        const blackName = currentGameState.black_player_name || 'Black';
+        
+        if (spectatorViewColor === 'white') {
+            // White view: black above (opponent), white below (player)
+            updateOpponentName(blackName);
+            updatePlayerNameDisplay(whiteName);
+        } else {
+            // Black view: white above (opponent), black below (player)
+            updateOpponentName(whiteName);
+            updatePlayerNameDisplay(blackName);
+        }
+    }
+}
+
+// Update move notation display using SAN from backend
+function updateMoveNotation(moveSanHistory, currentGameState = null) {
+    const moveNotationDisplay = document.getElementById('move-notation-display');
+    if (!moveNotationDisplay) return;
+    
+    if (!moveSanHistory || moveSanHistory.length === 0) {
+        moveNotationDisplay.textContent = '';
+        return;
+    }
+    
+    // Format moves with move numbers (white and black together)
+    let formattedMoves = [];
+    let moveNumber = 1;
+    
+    for (let i = 0; i < moveSanHistory.length; i++) {
+        const san = moveSanHistory[i];
+        if (!san) continue;
+        
+        const isWhite = i % 2 === 0;
+        
+        if (isWhite) {
+            formattedMoves.push(`${moveNumber}. ${san}`);
+        } else {
+            if (formattedMoves.length > 0) {
+                formattedMoves[formattedMoves.length - 1] += ` ${san}`;
+            } else {
+                formattedMoves.push(`${moveNumber}... ${san}`);
+            }
+            moveNumber++;
+        }
+    }
+    
+    // Display moves horizontally from left to right
+    moveNotationDisplay.textContent = formattedMoves.join(' ');
+}
+
+function formatTime(seconds) {
+    if (seconds === null || seconds === undefined) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+function updateTimerDisplay() {
+    const playerTimer = document.getElementById('player-timer');
+    const opponentTimer = document.getElementById('opponent-timer');
+    
+    if (!playerTimer || !opponentTimer) return;
+    
+    // Calculate current time based on last update and elapsed time
+    let currentWhiteTime = whiteTimeRemaining;
+    let currentBlackTime = blackTimeRemaining;
+    
+    if (lastTimeUpdate && gameStarted && !isSpectator) {
+        const elapsed = Math.floor((Date.now() - lastTimeUpdate) / 1000);
+        const currentTurn = currentGameState?.turn;
+        
+        if (currentTurn === 'white' && currentWhiteTime !== null) {
+            currentWhiteTime = Math.max(0, currentWhiteTime - elapsed);
+        } else if (currentTurn === 'black' && currentBlackTime !== null) {
+            currentBlackTime = Math.max(0, currentBlackTime - elapsed);
+        }
+    }
+    
+    // Determine which timer to show based on player color
+    if (isSpectator) {
+        // For spectators, show both timers based on view color
+        const viewColor = spectatorViewColor || 'white';
+        if (viewColor === 'white') {
+            // White view: black above (opponent), white below (player)
+            opponentTimer.textContent = formatTime(currentBlackTime);
+            playerTimer.textContent = formatTime(currentWhiteTime);
+            
+            // Highlight active timer
+            const currentTurn = currentGameState?.turn;
+            if (currentTurn === 'black') {
+                opponentTimer.classList.add('timer-active');
+                playerTimer.classList.remove('timer-active');
+            } else if (currentTurn === 'white') {
+                playerTimer.classList.add('timer-active');
+                opponentTimer.classList.remove('timer-active');
+            }
+            
+            // Warning colors
+            if (currentBlackTime !== null && currentBlackTime < 30 && currentBlackTime > 0) {
+                opponentTimer.classList.add('timer-warning');
+            } else {
+                opponentTimer.classList.remove('timer-warning');
+            }
+            if (currentWhiteTime !== null && currentWhiteTime < 30 && currentWhiteTime > 0) {
+                playerTimer.classList.add('timer-warning');
+            } else {
+                playerTimer.classList.remove('timer-warning');
+            }
+        } else {
+            // Black view: white above (opponent), black below (player)
+            opponentTimer.textContent = formatTime(currentWhiteTime);
+            playerTimer.textContent = formatTime(currentBlackTime);
+            
+            // Highlight active timer
+            const currentTurn = currentGameState?.turn;
+            if (currentTurn === 'white') {
+                opponentTimer.classList.add('timer-active');
+                playerTimer.classList.remove('timer-active');
+            } else if (currentTurn === 'black') {
+                playerTimer.classList.add('timer-active');
+                opponentTimer.classList.remove('timer-active');
+            }
+            
+            // Warning colors
+            if (currentWhiteTime !== null && currentWhiteTime < 30 && currentWhiteTime > 0) {
+                opponentTimer.classList.add('timer-warning');
+            } else {
+                opponentTimer.classList.remove('timer-warning');
+            }
+            if (currentBlackTime !== null && currentBlackTime < 30 && currentBlackTime > 0) {
+                playerTimer.classList.add('timer-warning');
+            } else {
+                playerTimer.classList.remove('timer-warning');
+            }
+        }
+    } else {
+        // For players, show their timer and opponent's timer
+        if (myColor === 'white') {
+            playerTimer.textContent = formatTime(currentWhiteTime);
+            opponentTimer.textContent = formatTime(currentBlackTime);
+            
+            // Highlight active timer
+            const currentTurn = currentGameState?.turn;
+            if (currentTurn === 'white') {
+                playerTimer.classList.add('timer-active');
+                opponentTimer.classList.remove('timer-active');
+            } else {
+                opponentTimer.classList.add('timer-active');
+                playerTimer.classList.remove('timer-active');
+            }
+            
+            // Warning colors
+            if (currentWhiteTime !== null && currentWhiteTime < 30 && currentWhiteTime > 0) {
+                playerTimer.classList.add('timer-warning');
+            } else {
+                playerTimer.classList.remove('timer-warning');
+            }
+            if (currentBlackTime !== null && currentBlackTime < 30 && currentBlackTime > 0) {
+                opponentTimer.classList.add('timer-warning');
+            } else {
+                opponentTimer.classList.remove('timer-warning');
+            }
+        } else if (myColor === 'black') {
+            playerTimer.textContent = formatTime(currentBlackTime);
+            opponentTimer.textContent = formatTime(currentWhiteTime);
+            
+            // Highlight active timer
+            const currentTurn = currentGameState?.turn;
+            if (currentTurn === 'black') {
+                playerTimer.classList.add('timer-active');
+                opponentTimer.classList.remove('timer-active');
+            } else {
+                opponentTimer.classList.add('timer-active');
+                playerTimer.classList.remove('timer-active');
+            }
+            
+            // Warning colors
+            if (currentBlackTime !== null && currentBlackTime < 30 && currentBlackTime > 0) {
+                playerTimer.classList.add('timer-warning');
+            } else {
+                playerTimer.classList.remove('timer-warning');
+            }
+            if (currentWhiteTime !== null && currentWhiteTime < 30 && currentWhiteTime > 0) {
+                opponentTimer.classList.add('timer-warning');
+            } else {
+                opponentTimer.classList.remove('timer-warning');
+            }
+        }
+    }
+}
+
+
+

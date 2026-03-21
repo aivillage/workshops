@@ -1,0 +1,32 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Note: Cargo.lock is kept in repo for reproducible builds (not ignored)
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak

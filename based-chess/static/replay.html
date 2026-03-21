@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Replay Game - based</title>
+    <link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body>
+    <div class="container">
+        <div id="game-layout-container" style="display: flex; flex-direction: column; align-items: center; width: 100%; gap: 20px;">
+            <div id="game-left-panel">
+                <div id="spectator-controls" style="display: flex; margin-bottom: 10px; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                    <button id="back-to-lobby-btn" class="btn btn-secondary" onclick="window.location.href='/'">Back to Lobby</button>
+                    <button id="flip-view-btn" class="btn btn-secondary">Flip View</button>
+                </div>
+                
+                <div id="chessboard-container">
+                    <div id="opponent-name-display" class="player-name-display" style="display: block;">
+                        <span id="opponent-name-board-text">-</span>
+                    </div>
+                    <div id="chessboard"></div>
+                    <div id="player-name-display" class="player-name-display" style="display: block;">
+                        <span id="player-name-board-text">-</span>
+                    </div>
+                    <div id="game-status-text" class="status-text"></div>
+                    <div id="move-notation-display"></div>
+                </div>
+                
+                <!-- Replay Controls -->
+                <div id="replay-controls" style="display: flex; justify-content: center; gap: 10px; margin: 20px 0; flex-wrap: wrap;">
+                    <button id="rewind-start-btn" class="replay-btn btn-purple" title="Rewind to start">⏮️</button>
+                    <button id="rewind-one-btn" class="replay-btn btn-purple" title="Rewind one move">⏪</button>
+                    <button id="play-btn" class="replay-btn btn-purple" title="Play">▶️</button>
+                    <button id="pause-btn" class="replay-btn btn-purple" title="Pause" style="display: none;">⏸️</button>
+                    <button id="forward-one-btn" class="replay-btn btn-purple" title="Fast forward one move">⏩</button>
+                    <button id="forward-end-btn" class="replay-btn btn-purple" title="Fast forward to end">⏭️</button>
+                    <button id="download-pgn-btn" class="replay-btn btn-purple" title="Download PGN">📥</button>
+                    <button id="delete-game-btn" class="replay-btn btn-danger" title="Delete Game">🗑️</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Polyfill for CommonJS exports in browser
+        if (typeof exports === 'undefined') {
+            var exports = {};
+        }
+    </script>
+    <script src="/static/chess.min.js?v=1"></script>
+    <script>
+        // Make Chess available globally from exports
+        if (typeof exports !== 'undefined' && exports.Chess) {
+            window.Chess = exports.Chess;
+        }
+        
+        // Configure Stockfish to use local files before loading
+        window.Stockfish = window.Stockfish || {};
+        window.Stockfish.locateFile = function(path) {
+            if (path === 'stockfish.worker.js') {
+                return '/static/stockfish.worker.js';
+            }
+            if (path === 'stockfish.wasm') {
+                return '/static/stockfish.wasm';
+            }
+            return '/static/' + path;
+        };
+    </script>
+    <script src="/static/stockfish.js"></script>
+    <script type="module" src="/static/js/replay.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,40 @@
+[package]
+name = "chess-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "trace", "set-header"] }
+
+# WebSocket
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# Chess logic
+shakmaty = "0.28"
+
+# Random number generation
+rand = "0.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+base64 = "0.21"
+anyhow = "1.0"
+thiserror = "1.0"
+regex = "1.10"
+
+# Async utilities
+tokio-stream = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
