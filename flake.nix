@@ -53,7 +53,7 @@
                     CONTEXT_PATH="$ROOT_DIR/${path}"
 
                     echo "Building $LOCAL_TAG from $CONTEXT_PATH..."
-                    docker build -t "$LOCAL_TAG" "$CONTEXT_PATH"
+                    docker build --platform linux/amd64 -t "$LOCAL_TAG" "$CONTEXT_PATH"
 
                     echo "Tagging $LOCAL_TAG as $REMOTE_TAG..."
                     docker tag "$LOCAL_TAG" "$REMOTE_TAG"
@@ -71,7 +71,7 @@
                     RESULT_LINK="result-${name}"
 
                     echo "Building Nix attribute: ${path}..."
-                    nix build "$ROOT_DIR#${path}" --out-link "$RESULT_LINK"
+                    nix build --platform linux/amd64 "$ROOT_DIR#${path}" --out-link "$RESULT_LINK"
 
                     echo "Loading $LOCAL_TAG into Docker..."
                     docker load < "$RESULT_LINK"
@@ -133,6 +133,10 @@
               path = "rag-poisoning/user";
             }
             {
+              name = "llm-embeddings";
+              path = "llm-embeddings";
+            }
+            {
               name = "rag-poisoning-service";
               path = "rag-poisoning/service";
             }
@@ -155,6 +159,16 @@
               with pkgs;
               [
                 docker
+                curl
+                talosctl
+                kubectl
+                kubernetes-helm
+                tilt
+                openssl
+                zsh
+                k9s
+                cilium-cli
+                hubble
               ]
               ++ myContainerScripts;
 

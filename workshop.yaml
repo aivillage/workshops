@@ -209,10 +209,10 @@ metadata:
   namespace: workshop
 spec:
   hard:
-    requests.cpu: "20"
-    requests.memory: "20Gi"
-    limits.cpu: "40"
-    limits.memory: "40Gi"
+    requests.cpu: "40"
+    requests.memory: "70Gi"
+    limits.cpu: "80"
+    limits.memory: "140Gi"
     pods: "100"
     services: "100"
 ---
@@ -260,19 +260,19 @@ data:
   # Core configuration
   workshop-name: "test-workshop"
   workshop-namespace: "workshop"
-  # CHANGED: Added yolo-l2 and email-indirect workshops
+  # CHANGED: Added yolo-l2, email-indirect, llm-embeddings, rag-poisoning, and prompt-extraction workshops
   config.yaml: |
     workshops:
       - name: "yolo-l2"
-        image: "ghcr.io/nbhdai/workshop-yolo-l2-notebook:latest"
+        image: "ghcr.io/nbhdai/yolo-l2-notebook:latest"
         description: "YOLO Adversarial Challenge"
         port: 5000
         env:
           BASE_URL: "/workshop/yolo-l2"
-          VERIFICATION_SERVER_UNTARGETED: http://workshop-yolo-l2-verification:5000/verify
-          VERIFICATION_SERVER_TARGETED: http://workshop-yolo-l2-target-verification:5000/verify
+          VERIFICATION_SERVER_UNTARGETED: http://yolo-l2-verification:5000/verify
+          VERIFICATION_SERVER_TARGETED: http://yolo-l2-target-verification:5000/verify
       - name: "email-indirect"
-        image: "ghcr.io/nbhdai/workshop-email-indirect-user:latest"
+        image: "ghcr.io/nbhdai/email-indirect-user:latest"
         description: "Email Injection Challenge"
         port: 5000
         env:
@@ -280,13 +280,31 @@ data:
           CHALLENGE_SERVER_PORT: 2525
           MY_LISTEN_PORT: 25
           WEB_PORT: 5000
+      - name: "llm-embeddings"
+        image: "ghcr.io/nbhdai/llm-embeddings:latest"
+        description: "LLM Embeddings Explorer"
+        port: 8080
+        env:
+          PORT: "8080"
+      - name: "rag-poisoning"
+        image: "ghcr.io/nbhdai/rag-poisoning-user:latest"
+        description: "RAG Poisoning Challenge"
+        port: 5000
+        env:
+          SERVICE_URL: "http://rag-poisoning-service:5000"
+      - name: "prompt-extraction"
+        image: "ghcr.io/nbhdai/prompt-extraction-user:latest"
+        description: "Prompt Extraction Challenge"
+        port: 5000
+        env:
+          SERVICE_URL: "http://prompt-extraction-service:5000"
 
     workshop_namespace: "workshop"
     workshop_ttl_seconds: 3600
     workshop_idle_seconds: 600
     sidecar_proxy_port: 8888
     sidecar_health_port: 9000
-    workshop_pod_limit: 10
+    workshop_pod_limit: 20
     workshop_cpu_request: "1.0"
     workshop_cpu_limit: "2.0"
     workshop_mem_request: "1Gi"
@@ -392,6 +410,36 @@ spec:
                 name: workshop-hub
                 port:
                   number: 8080
+---
+# 1. Define the pool of IP addresses Cilium is allowed to use for LoadBalancers
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: "workshop-lb-pool"
+spec:
+  blocks:
+    - cidr: "10.211.0.50/32" # Restricts the pool to just your requested IP
+---
+# 2. Tell Cilium to actually announce LoadBalancer IPs on the local network via ARP
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: "workshop-l2-policy"
+spec:
+  externalIPs: true
+  loadBalancerIPs: true
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: "workshop-l2-policy"
+spec:
+  externalIPs: true
+  loadBalancerIPs: true
+  nodeSelector:
+    matchExpressions:
+      - key: kubernetes.io/os
+        operator: Exists
 # # =============================================================================
 # # 6. Supporting Services (YOLO & Email Challenges)
 # # =============================================================================
@@ -415,8 +463,7 @@ spec:
     spec:
       containers:
         - name: verification
-          image: ghcr.io/nbhdai/workshop-yolo-l2-verification:latest
-          imagePullPolicy: Always
+          image: ghcr.io/nbhdai/yolo-l2-verification:latest
           ports:
             - containerPort: 5000
           env:
@@ -464,8 +511,7 @@ spec:
     spec:
       containers:
         - name: service
-          image: ghcr.io/nbhdai/workshop-email-indirect-service:latest
-          imagePullPolicy: Always
+          image: ghcr.io/nbhdai/email-indirect-service:latest
           ports:
             - containerPort: 2525
           env:
@@ -601,3 +647,100 @@ spec:
     requests:
       storage: 500Gi
   volumeName: model-store-pv
+---
+# =============================================================================
+# 7. Supporting Services (RAG Poisoning & Prompt Extraction)
+# =============================================================================
+# --- RAG Poisoning ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-poisoning-service
+  namespace: workshop
+  labels:
+    app: rag-poisoning-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-poisoning-service
+  template:
+    metadata:
+      labels:
+        app: rag-poisoning-service
+    spec:
+      containers:
+        - name: service
+          image: ghcr.io/nbhdai/rag-poisoning-service:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: VLLM_URL
+              value: "http://vllm-gemma3:80"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-poisoning-service
+  namespace: workshop
+spec:
+  selector:
+    app: rag-poisoning-service
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+---
+# --- Prompt Extraction ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prompt-extraction-service
+  namespace: workshop
+  labels:
+    app: prompt-extraction-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prompt-extraction-service
+  template:
+    metadata:
+      labels:
+        app: prompt-extraction-service
+    spec:
+      containers:
+        - name: service
+          image: ghcr.io/nbhdai/prompt-extraction-service:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: VLLM_URL
+              value: "http://vllm-gemma3:80"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prompt-extraction-service
+  namespace: workshop
+spec:
+  selector:
+    app: prompt-extraction-service
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
