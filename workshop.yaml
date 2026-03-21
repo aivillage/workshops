@@ -1,0 +1,610 @@
+# =============================================================================
+# 1. Namespaces
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workshop-hub-system
+  labels:
+    name: workshop-hub-system
+    purpose: workshop-hub-control-plane
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workshop
+  labels:
+    name: workshop
+    purpose: workshop-pods
+    managed-by: workshop-hub
+---
+# =============================================================================
+# 2. RBAC (ServiceAccount, ClusterRole, Bindings)
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workshop-hub-controller
+  namespace: workshop-hub-system
+  labels:
+    app: workshop-hub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: workshop-hub-controller
+  labels:
+    app: workshop-hub
+rules:
+  # Pod management in workshop namespaces only
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+
+  # Pod status for health checks
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+
+  # Service management in workshop namespaces
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+
+  # Secret management in workshop namespaces
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch", "update"]
+
+  # Ability to check if namespaces exist
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workshop-hub-manage-workshops
+  namespace: workshop
+  labels:
+    app: workshop-hub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: workshop-hub-controller
+subjects:
+  - kind: ServiceAccount
+    name: workshop-hub-controller
+    namespace: workshop-hub-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workshop-hub-self
+  namespace: workshop-hub-system
+  labels:
+    app: workshop-hub
+rules:
+  # Hub needs to read its own config
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workshop-hub-self-binding
+  namespace: workshop-hub-system
+  labels:
+    app: workshop-hub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workshop-hub-self
+subjects:
+  - kind: ServiceAccount
+    name: workshop-hub-controller
+    namespace: workshop-hub-system
+---
+# =============================================================================
+# 3. Cilium Network Policies
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-hub-to-workshops
+  namespace: workshop
+spec:
+  description: "Allow workshop pods to receive traffic from the hub"
+  endpointSelector:
+    matchLabels:
+      managed-by: workshop-hub
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: workshop-hub-system
+            app: workshop-hub
+      toPorts:
+        - ports:
+            - port: "8888" # Sidecar proxy port
+              protocol: TCP
+            - port: "9000" # Sidecar health port
+              protocol: TCP
+
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "9000" # Health check port
+              protocol: TCP
+
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-hub-egress-to-workshops
+  namespace: workshop-hub-system
+spec:
+  description: "Allow workshop-hub to reach workshop pods for proxying and health checks"
+  endpointSelector:
+    matchLabels:
+      app: workshop-hub
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: workshop
+      toPorts:
+        - ports:
+            - port: "8888" # Sidecar proxy port
+              protocol: TCP
+            - port: "9000" # Sidecar health port
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-workshop-to-ai-proxy
+  namespace: default
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ai-proxy
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: workshop
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-ai-proxy-egress
+  namespace: workshop
+spec:
+  endpointSelector: {} # Matches ALL pods
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: default
+            app: ai-proxy
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "ai-proxy-svc.default.svc.cluster.local"
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-workshops-egress
+  namespace: workshop
+spec:
+  description: "Allow workshop pods to reach DNS, internet, and internal services"
+  endpointSelector:
+    matchLabels:
+      managed-by: workshop-hub
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+    # This allows workshops to talk to services in the same namespace (like challenge-server)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: workshop
+---
+# =============================================================================
+# 4. Resource Limits & Configuration
+# =============================================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: workshop-quota
+  namespace: workshop
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: "20Gi"
+    limits.cpu: "40"
+    limits.memory: "40Gi"
+    pods: "100"
+    services: "100"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: hub-quota
+  namespace: workshop-hub-system
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "4"
+    limits.memory: "8Gi"
+    pods: "10"
+    services: "5"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: workshop-limits
+  namespace: workshop
+spec:
+  limits:
+    - max:
+        cpu: "4"
+        memory: "8Gi"
+      min:
+        cpu: "10m"
+        memory: "4Mi"
+      default:
+        cpu: "2"
+        memory: "2Gi"
+      defaultRequest:
+        cpu: "2"
+        memory: "2Gi"
+      type: Container
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workshop-hub-config
+  namespace: workshop-hub-system
+data:
+  # Core configuration
+  workshop-name: "test-workshop"
+  workshop-namespace: "workshop"
+  # CHANGED: Added yolo-l2 and email-indirect workshops
+  config.yaml: |
+    workshops:
+      - name: "yolo-l2"
+        image: "ghcr.io/nbhdai/workshop-yolo-l2-notebook:latest"
+        description: "YOLO Adversarial Challenge"
+        port: 5000
+        env:
+          BASE_URL: "/workshop/yolo-l2"
+      - name: "email-indirect"
+        image: "ghcr.io/nbhdai/workshop-email-indirect-user:latest"
+        description: "Email Injection Challenge"
+        port: 5000
+        env:
+          CHALLENGE_SERVER_HOST: "email-service"
+          CHALLENGE_SERVER_PORT: 2525
+          MY_LISTEN_PORT: 25
+          WEB_PORT: 5000
+    workshop_namespace: "workshop"
+    workshop_ttl_seconds: 3600
+    workshop_idle_seconds: 600
+    sidecar_proxy_port: 8888
+    sidecar_health_port: 9000
+    workshop_pod_limit: 10
+    workshop_cpu_request: "1.0"
+    workshop_cpu_limit: "2.0"
+    workshop_mem_request: "1Gi"
+    workshop_mem_limit: "2Gi"
+    sidecar_image: "ghcr.io/nbhdai/workshop-sidecar:latest"
+    garbage_collection_seconds: 300
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: workshop-hub-auth
+  namespace: workshop-hub-system
+type: Opaque
+data:
+  # Base64 encoded "test-secret-key"
+  jwt-secret: dGVzdC1zZWNyZXQta2V5
+---
+# =============================================================================
+# 5. Hub Deployment & Service
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workshop-hub
+  namespace: workshop-hub-system
+  labels:
+    app: workshop-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workshop-hub
+  template:
+    metadata:
+      labels:
+        app: workshop-hub
+    spec:
+      serviceAccountName: workshop-hub-controller
+      containers:
+        - name: workshop-hub
+          image: ghcr.io/nbhdai/workshop-hub:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: "RuntimeDefault"
+          env:
+            - name: HOME
+              value: "/tmp"
+            - name: RUST_LOG
+              value: "trace,tower_http=debug,tower=info,fred=debug,h2=off,hyper=off,sqlx=off,tarpc=off,rustls=off"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/workshop/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: workshop-hub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workshop-hub
+  namespace: workshop-hub-system
+  labels:
+    app: workshop-hub
+spec:
+  type: NodePort
+  selector:
+    app: workshop-hub
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30303
+      protocol: TCP
+
+
+# =============================================================================
+# 6. Supporting Services (YOLO & Email Challenges)
+# =============================================================================
+---
+# YOLO Challenge Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yolo-l2-verification
+  namespace: workshop
+  labels:
+    app: yolo-l2-verification
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yolo-l2-verification
+  template:
+    metadata:
+      labels:
+        app: yolo-l2-verification
+    spec:
+      containers:
+        - name: verification
+          image: ghcr.io/nbhdai/workshop-yolo-l2-verification:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: L2_THRESHOLD
+              value: "50.0"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yolo-l2-verification
+  namespace: workshop
+spec:
+  selector:
+    app: yolo-l2-verification
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+
+---
+# Email Workshop Service (LLM Bot)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: email-indirect-service
+  namespace: workshop
+  labels:
+    app: email-indirect-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: email-indirect-service
+  template:
+    metadata:
+      labels:
+        app: email-indirect-service
+    spec:
+      containers:
+        - name: service
+          image: ghcr.io/nbhdai/workshop-email-indirect-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 2525
+          env:
+            - name: LISTEN_PORT
+              value: "2525"
+            - name: VLLM_URL
+              # Pointing to the AI Proxy in default namespace (assuming it exists based on policies)
+              value: "http://ai-proxy-svc.default.svc.cluster.local/v1/chat/completions"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: email-indirect-service
+  namespace: workshop
+spec:
+  selector:
+    app: email-indirect-service
+  ports:
+    - protocol: TCP
+      port: 2525
+      targetPort: 2525
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.17.1-cu130
+          command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - "--model"
+            - "/model-store/google/gemma-3-4b-it/"
+            - "--served-model-name"
+            - "google/gemma-3-4b-it"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+            requests:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: model-store
+              mountPath: /model-store
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: model-store
+          persistentVolumeClaim:
+            claimName: model-store-pvc
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app: vllm
