@@ -137,7 +137,6 @@ spec:
         - ports:
             - port: "9000" # Health check port
               protocol: TCP
-
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -171,58 +170,6 @@ spec:
               protocol: TCP
     - toEntities:
         - kube-apiserver
-
----
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-workshop-to-ai-proxy
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: ai-proxy
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: workshop
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
----
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ai-proxy-egress
-  namespace: workshop
-spec:
-  endpointSelector: {} # Matches ALL pods
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: kube-system
-            k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-            - port: "53"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: default
-            app: ai-proxy
-      toPorts:
-        - ports:
-            - port: "80"
-              protocol: TCP
-    - toFQDNs:
-        - matchName: "ai-proxy-svc.default.svc.cluster.local"
-      toPorts:
-        - ports:
-            - port: "80"
-              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -291,8 +238,8 @@ metadata:
 spec:
   limits:
     - max:
-        cpu: "4"
-        memory: "8Gi"
+        cpu: "50"
+        memory: "200Gi"
       min:
         cpu: "10m"
         memory: "4Mi"
@@ -322,15 +269,18 @@ data:
         port: 5000
         env:
           BASE_URL: "/workshop/yolo-l2"
+          VERIFICATION_SERVER_UNTARGETED: http://workshop-yolo-l2-verification:5000/verify
+          VERIFICATION_SERVER_TARGETED: http://workshop-yolo-l2-target-verification:5000/verify
       - name: "email-indirect"
         image: "ghcr.io/nbhdai/workshop-email-indirect-user:latest"
         description: "Email Injection Challenge"
         port: 5000
         env:
-          CHALLENGE_SERVER_HOST: "email-service"
+          CHALLENGE_SERVER_HOST: "email-indirect-service"
           CHALLENGE_SERVER_PORT: 2525
           MY_LISTEN_PORT: 25
           WEB_PORT: 5000
+
     workshop_namespace: "workshop"
     workshop_ttl_seconds: 3600
     workshop_idle_seconds: 600
@@ -343,16 +293,6 @@ data:
     workshop_mem_limit: "2Gi"
     sidecar_image: "ghcr.io/nbhdai/workshop-sidecar:latest"
     garbage_collection_seconds: 300
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: workshop-hub-auth
-  namespace: workshop-hub-system
-type: Opaque
-data:
-  # Base64 encoded "test-secret-key"
-  jwt-secret: dGVzdC1zZWNyZXQta2V5
 ---
 # =============================================================================
 # 5. Hub Deployment & Service
@@ -435,13 +375,27 @@ spec:
       targetPort: 8080
       nodePort: 30303
       protocol: TCP
-
-
-# =============================================================================
-# 6. Supporting Services (YOLO & Email Challenges)
-# =============================================================================
 ---
-# YOLO Challenge Server
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workshop-hub
+  namespace: workshop-hub-system
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workshop-hub
+                port:
+                  number: 8080
+# # =============================================================================
+# # 6. Supporting Services (YOLO & Email Challenges)
+# # =============================================================================
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -519,7 +473,7 @@ spec:
               value: "2525"
             - name: VLLM_URL
               # Pointing to the AI Proxy in default namespace (assuming it exists based on policies)
-              value: "http://ai-proxy-svc.default.svc.cluster.local/v1/chat/completions"
+              value: "http://vllm-gemma3:80"
           resources:
             requests:
               memory: "128Mi"
@@ -544,67 +498,106 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm
+  name: vllm-gemma3
+  namespace: workshop
   labels:
-    app: vllm
+    app: vllm-gemma3
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: vllm
+      app: vllm-gemma3
   template:
     metadata:
       labels:
-        app: vllm
+        app: vllm-gemma3
     spec:
-      enableServiceLinks: false
+      # CRITICAL: This tells Talos to use the Nvidia container runtime
+      runtimeClassName: nvidia
       containers:
         - name: vllm
-          image: vllm/vllm-openai:v0.17.1-cu130
+          image: vllm/vllm-openai:latest
           command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - "--model"
-            - "/model-store/google/gemma-3-4b-it/"
+            - "/models/google/gemma-3-4b-it" # Check your exact folder name on the PVC
             - "--served-model-name"
-            - "google/gemma-3-4b-it"
+            - "gemma-3"
             - "--host"
             - "0.0.0.0"
             - "--port"
             - "8000"
+            # Gemma 3 is multimodal; trust remote code is sometimes required for newest architectures
+            - "--trust-remote-code"
+            - "--gpu-memory-utilization"
+            - "0.95"
+            - "--max-model-len"
+            - "8192"
           ports:
             - containerPort: 8000
-              name: http
           resources:
-            limits:
-              nvidia.com/gpu: 1
             requests:
-              nvidia.com/gpu: 1
+              nvidia.com/gpu: "1"
+              memory: "16Gi"
+              cpu: "4"
+            limits:
+              nvidia.com/gpu: "1"
+              memory: "24Gi"
+              cpu: "8"
           volumeMounts:
-            - name: model-store
-              mountPath: /model-store
-            - name: dshm
-              mountPath: /dev/shm
+            - name: model-storage
+              mountPath: /models
+              readOnly: true
       volumes:
-        - name: model-store
+        - name: model-storage
           persistentVolumeClaim:
             claimName: model-store-pvc
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 16Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm
-  labels:
-    app: vllm
+  name: vllm-gemma3
+  namespace: workshop
 spec:
-  type: ClusterIP
-  ports:
-    - port: 8000
-      targetPort: 8000
-      protocol: TCP
-      name: http
   selector:
-    app: vllm
+    app: vllm-gemma3
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: model-store-pv
+spec:
+  capacity:
+    storage: 500Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany # Safe for vLLM scaling
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual-models
+  mountOptions:
+    - nfsvers=4.1
+    - noatime # Improves read performance
+    - nolock
+    - tcp
+  nfs:
+    server: 10.211.0.10
+    path: /mnt/data/model-store/
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-store-pvc
+  namespace: workshop
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: manual-models
+  resources:
+    requests:
+      storage: 500Gi
+  volumeName: model-store-pv

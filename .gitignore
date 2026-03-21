@@ -1,1 +1,5 @@
 .DS_Store
+.envrc
+.direnv
+.direnv/*
+.talos
