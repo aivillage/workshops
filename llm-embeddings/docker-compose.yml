@@ -1,0 +1,10 @@
+services:
+  viewer:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./static:/app/static:ro
+      - ./app.py:/app/app.py:ro
+    environment:
+      - PORT=8080

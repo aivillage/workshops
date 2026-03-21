@@ -3,7 +3,7 @@
 To contribute make some containers and a "docker-compose.yml" that connects them and spins up a website.
 
 1. Aside from LLMs, each workshop has to be a self contained set of containers.
-2. The containers need to serve a website.
+2. The containers need to serve a single website.
 3. GPU memory access is limited as we only have 96GB of vram in the portable cluster.
 
 ## Keep in Mind

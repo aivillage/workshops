@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM Internals Viewer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; font-weight: 700; background: linear-gradient(135deg,#6366f1,#ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sub { font-size: 10px; color: #475569; margin-top: 4px; }
+  .status { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; display: inline-block; margin-top: 6px; }
+  .status.ok { background: #10b98120; color: #10b981; }
+  .status.off { background: #ef444420; color: #ef4444; }
+
+  .input-wrap { position: relative; margin: 16px 0; }
+  .editor-container { position: relative; min-height: 46px; }
+  .editor {
+    width: 100%; min-height: 46px; padding: 12px 90px 12px 14px;
+    background: transparent; border: 1px solid #334155; border-radius: 8px;
+    color: transparent; caret-color: #e2e8f0;
+    font-size: 15px; font-family: monospace; line-height: 1.4;
+    outline: none; white-space: pre-wrap; word-wrap: break-word;
+    position: relative; z-index: 2;
+  }
+  .editor:focus { border-color: #6366f1; }
+  .editor:empty::before { content: attr(data-placeholder); color: #475569; pointer-events: none; }
+  .editor-colors {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    padding: 12px 90px 12px 14px;
+    font-size: 15px; font-family: monospace; line-height: 1.4;
+    white-space: pre-wrap; word-wrap: break-word;
+    pointer-events: none; z-index: 1;
+    border: 1px solid transparent; border-radius: 8px;
+  }
+  .editor-colors span { border-radius: 2px; }
+  .spinner { position: absolute; right: 14px; top: 14px; width: 18px; height: 18px; border: 2px solid #334155; border-top-color: #6366f1; border-radius: 50%; animation: spin .6s linear infinite; display: none; z-index: 3; }
+  .spinner.active { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ghost { position: absolute; right: 14px; top: 15px; font-size: 11px; color: #475569; font-family: monospace; pointer-events: none; z-index: 3; }
+
+  .panel { background: #1e293b; border-radius: 10px; padding: 14px; border: 1px solid #334155; margin-bottom: 14px; opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s; }
+  .panel.visible { opacity: 1; transform: translateY(0); }
+  .panel-title { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tok { padding: 4px 8px; border-radius: 5px; font-size: 13px; font-family: monospace; cursor: pointer; border: 2px solid transparent; transition: all .15s; }
+  .tok.sel { color: #fff !important; }
+  .tok-info { margin-top: 6px; font-size: 11px; color: #64748b; font-family: monospace; }
+
+  /* Heatmap — tokens as columns, freqs as rows */
+  .heatmap-stack { display: flex; flex-direction: column; gap: 18px; }
+  .heatmap-section { overflow-x: auto; }
+  .heatmap-label { font-size: 10px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .heatmap-table { border-collapse: separate; border-spacing: 1px; }
+  .heatmap-table .ht-corner { width: 36px; }
+  .heatmap-table .ht-tok-label {
+    font-size: 9px; font-family: monospace; text-align: center; padding: 2px 3px;
+    max-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    cursor: pointer; vertical-align: bottom; height: 22px;
+  }
+  .heatmap-table .ht-freq-label {
+    font-size: 8px; font-family: monospace; color: #64748b; text-align: right;
+    padding-right: 4px; white-space: nowrap; height: 14px;
+  }
+  .heatmap-table .ht-cell {
+    width: 18px; min-width: 14px; height: 14px;
+    border-radius: 2px; cursor: crosshair; transition: outline .1s;
+  }
+  .heatmap-table .ht-cell:hover { outline: 1px solid #e2e8f0; outline-offset: -1px; }
+  .ht-col-sel { outline: 2px solid #e2e8f0; outline-offset: -1px; }
+
+  .legend { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .legend-bar { height: 8px; flex: 1; max-width: 180px; border-radius: 4px; }
+  .legend-label { font-size: 9px; color: #64748b; font-family: monospace; }
+
+  .heatmap-tooltip { position: fixed; background: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: 6px 10px; font-size: 11px; font-family: monospace; color: #e2e8f0; pointer-events: none; z-index: 100; display: none; white-space: nowrap; }
+
+  .bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .bar-label { width: 80px; font-size: 11px; color: #e2e8f0; text-align: right; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; background: #0f172a; border-radius: 3px; height: 20px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .bar-val { width: 60px; font-size: 10px; color: #94a3b8; font-family: monospace; }
+  .bar-extra { width: 55px; font-size: 9px; color: #64748b; font-family: monospace; }
+
+  .note { font-size: 9px; color: #475569; margin-top: 6px; }
+  .footer { background: #1e293b22; border-radius: 8px; padding: 10px; border: 1px dashed #334155; font-size: 10px; color: #475569; margin-bottom: 14px; opacity: 0; transition: opacity .3s; }
+  .footer.visible { opacity: 1; }
+  .footer strong { color: #64748b; }
+  .empty-state { text-align: center; padding: 60px 20px; color: #334155; font-size: 14px; }
+  .empty-state .arrow { font-size: 28px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LLM Internals Viewer</h1>
+  <div class="sub">Live tokenization · Embedding FFT heatmaps · Next-token logits — updates as you type</div>
+  <div id="status" class="status off">Checking backend...</div>
+
+  <div class="input-wrap">
+    <div class="editor-container">
+      <div class="editor-colors" id="editorColors"></div>
+      <div class="editor" id="editor" contenteditable="true" data-placeholder="Start typing to see model internals..." spellcheck="false"></div>
+    </div>
+    <div class="spinner" id="spinner"></div>
+    <div class="ghost" id="ghost"></div>
+  </div>
+
+  <div id="results">
+    <div class="empty-state">
+      <div class="arrow">⌨</div>
+      Type something above — results appear live
+    </div>
+  </div>
+</div>
+<div class="heatmap-tooltip" id="tooltip"></div>
+
+<script>
+const COLORS = ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#14b8a6","#f97316","#3b82f6","#84cc16"];
+const BG_ALPHA = "28";
+const STATE = { result: null, selectedToken: 0, pending: null, inflight: false, lastText: "" };
+const DEBOUNCE_MS = 250;
+let debounceTimer = null;
+
+const editorEl = document.getElementById("editor");
+const colorsEl = document.getElementById("editorColors");
+const tooltipEl = document.getElementById("tooltip");
+
+const SCALES = {
+  input_embed:   { from: [15, 23, 42], to: [99, 102, 241] },
+  output_hidden: { from: [15, 23, 42], to: [245, 158, 11] },
+  lm_head:       { from: [15, 23, 42], to: [236, 72, 153] },
+};
+
+function lerpColor(scale, t) {
+  t = Math.max(0, Math.min(1, t));
+  const r = Math.round(scale.from[0] + (scale.to[0] - scale.from[0]) * t);
+  const g = Math.round(scale.from[1] + (scale.to[1] - scale.from[1]) * t);
+  const b = Math.round(scale.from[2] + (scale.to[2] - scale.from[2]) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+fetch("/api/health").then(r=>r.json()).then(h=>{
+  const el = document.getElementById("status");
+  el.className = "status ok";
+  el.textContent = `● ${h.model_path} — ${h.device} — dim ${h.hidden_dim} — vocab ${h.vocab_size.toLocaleString()}`;
+}).catch(()=>{ document.getElementById("status").textContent = "● Backend offline"; });
+
+function getEditorText() { return editorEl.innerText.replace(/\n$/,""); }
+
+function renderColoredTokens(text, tokens) {
+  if (!tokens?.length || !text) { colorsEl.innerHTML = ""; return; }
+  let html = "", pos = 0;
+  tokens.forEach((t, i) => {
+    const c = COLORS[i % COLORS.length];
+    const idx = text.indexOf(t.text, pos);
+    if (idx > pos) html += escHtml(text.slice(pos, idx));
+    const start = idx >= 0 ? idx : pos;
+    html += `<span style="color:${c};background:${c}${BG_ALPHA}">${escHtml(t.text)}</span>`;
+    pos = start + t.text.length;
+  });
+  if (pos < text.length) html += escHtml(text.slice(pos));
+  colorsEl.innerHTML = html;
+}
+
+editorEl.addEventListener("input", function() {
+  clearTimeout(debounceTimer);
+  const text = getEditorText();
+  if (!text) {
+    STATE.result = null; colorsEl.innerHTML = "";
+    document.getElementById("results").innerHTML = '<div class="empty-state"><div class="arrow">⌨</div>Type something above — results appear live</div>';
+    document.getElementById("ghost").textContent = "";
+    return;
+  }
+  debounceTimer = setTimeout(() => fireRequest(text), DEBOUNCE_MS);
+});
+
+editorEl.addEventListener("paste", function(e) {
+  e.preventDefault();
+  document.execCommand("insertText", false, (e.clipboardData || window.clipboardData).getData("text/plain"));
+});
+
+editorEl.addEventListener("keydown", function(e) {
+  if (e.key === "Tab" && STATE.result?.logits?.length) {
+    e.preventDefault();
+    document.execCommand("insertText", false, STATE.result.logits[0].token);
+  }
+});
+
+async function fireRequest(text) {
+  if (text === STATE.lastText) return;
+  if (STATE.inflight) { STATE.pending = text; return; }
+  STATE.inflight = true; STATE.lastText = text;
+  document.getElementById("spinner").classList.add("active");
+  try {
+    const r = await fetch("/api/analyze", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const cur = getEditorText();
+    if (text === cur || !STATE.pending) {
+      STATE.result = data;
+      STATE.selectedToken = Math.max(0, data.tokens.length - 1);
+      renderColoredTokens(text, data.tokens);
+      render();
+    }
+  } catch(e) { console.error("analyze error:", e); }
+  STATE.inflight = false;
+  document.getElementById("spinner").classList.remove("active");
+  if (STATE.pending) { const n = STATE.pending; STATE.pending = null; fireRequest(n); }
+}
+
+function selectToken(i) { STATE.selectedToken = i; render(); }
+
+// Build transposed heatmap: rows = freq bins, columns = tokens
+function buildHeatmap(label, scaleKey, fftObj, tokens, selectedToken) {
+  const { freqs, values } = fftObj; // values[token_idx][freq_idx]
+  const scale = SCALES[scaleKey];
+  const nTok = tokens.length;
+  const nFreq = freqs.length;
+
+  let gmax = 0;
+  values.forEach(row => row.forEach(v => { if (v > gmax) gmax = v; }));
+  if (gmax === 0) gmax = 1;
+
+  let html = `<div class="heatmap-section"><div class="heatmap-label">${label}</div>`;
+  html += `<table class="heatmap-table">`;
+
+  // Header row: corner + token labels
+  html += `<tr><td class="ht-corner"></td>`;
+  tokens.forEach((t, ci) => {
+    const c = COLORS[ci % COLORS.length];
+    const sel = ci === selectedToken;
+    const display = t.text.replace(/ /g,"·").replace(/\n/g,"↵");
+    html += `<td class="ht-tok-label" style="color:${c};${sel ? 'font-weight:700;text-decoration:underline' : ''}" onclick="selectToken(${ci})">${escHtml(display)}</td>`;
+  });
+  html += `</tr>`;
+
+  // Each row = one frequency bin
+  for (let fi = 0; fi < nFreq; fi++) {
+    html += `<tr><td class="ht-freq-label">f${freqs[fi]}</td>`;
+    for (let ti = 0; ti < nTok; ti++) {
+      const v = values[ti][fi];
+      const t = v / gmax;
+      const bg = lerpColor(scale, t);
+      const sel = ti === selectedToken ? " ht-col-sel" : "";
+      html += `<td class="ht-cell${sel}" style="background:${bg}" data-token="${escAttr(tokens[ti].text)}" data-freq="${freqs[fi]}" data-val="${v.toFixed(4)}" data-scale="${scaleKey}"></td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `</table>`;
+
+  const gradStops = [0, 0.25, 0.5, 0.75, 1].map(t => lerpColor(scale, t)).join(",");
+  html += `<div class="legend"><span class="legend-label">0</span><div class="legend-bar" style="background:linear-gradient(to right,${gradStops})"></div><span class="legend-label">${gmax.toFixed(2)}</span></div>`;
+  html += `</div>`;
+  return html;
+}
+
+function render() {
+  const { result: R, selectedToken: si } = STATE;
+  if (!R) return;
+  const text = getEditorText();
+
+  document.getElementById("ghost").textContent = R.logits.length > 0 ? "Tab → " + R.logits[0].token : "";
+
+  let tokHtml = R.tokens.map((t,i) => {
+    const c = COLORS[i % COLORS.length];
+    const sel = i === si;
+    const display = t.text.replace(/ /g,"·").replace(/\n/g,"↵");
+    return `<span class="tok${sel?" sel":""}" onclick="selectToken(${i})" style="background:${sel?c:c+'25'};color:${sel?'#fff':c};${sel?'border-color:'+c:''}">${display}</span>`;
+  }).join("");
+  const cur = R.tokens[si];
+  if (cur) tokHtml += `<div class="tok-info">ID: ${cur.id} — "${cur.text}"</div>`;
+
+  const heatmaps = buildHeatmap("Input Embeddings (embed_tokens → FFT top 20)", "input_embed", R.fft.input_embed, R.tokens, si)
+    + buildHeatmap("Output Hidden States (last layer → FFT top 20)", "output_hidden", R.fft.output_hidden, R.tokens, si)
+    + buildHeatmap("LM Head Weights (lm_head → FFT top 20)", "lm_head", R.fft.lm_head, R.tokens, si);
+
+  const lMax = R.logits[0]?.prob || 0.5;
+  let logHtml = R.logits.map(d => {
+    const w = (d.prob / lMax) * 100;
+    const pStr = d.prob < 0.001 ? d.prob.toExponential(2) : d.prob.toFixed(4);
+    return `<div class="bar-row"><div class="bar-label">${escHtml(d.token)}</div><div class="bar-track"><div class="bar-fill" style="width:${w}%;background:#10b981"></div></div><div class="bar-val">${pStr}</div><div class="bar-extra">(${d.logit})</div></div>`;
+  }).join("");
+
+  document.getElementById("results").innerHTML = `
+    <div class="panel visible">
+      <div class="panel-title">① Tokenization — ${R.tokens.length} tokens</div>
+      <div class="tokens">${tokHtml}</div>
+    </div>
+    <div class="panel visible">
+      <div class="panel-title">② Embedding FFT Heatmaps (20 × N)</div>
+      <div class="heatmap-stack">${heatmaps}</div>
+    </div>
+    <div class="panel visible">
+      <div class="panel-title">③ Next-Token Logits → softmax</div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:8px">P(next | "${escHtml(text)}") — top ${R.logits.length} · <span style="color:#6366f1">Tab</span> to accept</div>
+      ${logHtml}
+    </div>
+    <div class="footer visible">
+      <strong>Model:</strong> ${R.model_path} on ${R.device} · vocab ${R.vocab_size.toLocaleString()} · hidden dim ${R.hidden_dim} · Real forward pass
+    </div>`;
+
+  document.querySelectorAll(".ht-cell").forEach(cell => {
+    cell.addEventListener("mouseenter", showTooltip);
+    cell.addEventListener("mouseleave", hideTooltip);
+  });
+}
+
+function showTooltip(e) {
+  const c = e.target;
+  const s = SCALES[c.dataset.scale];
+  tooltipEl.innerHTML = `<span style="color:${s ? lerpColor(s,1) : '#fff'}">${escHtml(c.dataset.token)}</span> · freq ${c.dataset.freq} · mag ${c.dataset.val}`;
+  tooltipEl.style.display = "block";
+  tooltipEl.style.left = (e.clientX + 12) + "px";
+  tooltipEl.style.top = (e.clientY - 30) + "px";
+}
+function hideTooltip() { tooltipEl.style.display = "none"; }
+
+function escHtml(s) { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+function escAttr(s) { return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+</script>
+</body>
+</html>
