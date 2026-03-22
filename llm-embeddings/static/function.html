@@ -1,57 +1,397 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Function Calling — Teaching Demos</title>
-<style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #232734;
-    --border: #2e3346;
-    --text: #e1e4ed;
-    --text-dim: #8a8fa8;
-    --accent: #6c8cff;
-    --green: #4ade80;
-    --orange: #fb923c;
-    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 20px; }
-  h1 { font-size:32px; font-weight:800; margin-bottom:8px; }
-  h1 span { color:var(--accent); }
-  .subtitle { color:var(--text-dim); font-size:15px; margin-bottom:48px; text-align:center; max-width:500px; line-height:1.6; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:20px; max-width:720px; width:100%; }
-  .card {
-    background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px;
-    text-decoration:none; color:var(--text); transition:all .2s;
-  }
-  .card:hover { border-color:var(--accent); transform:translateY(-3px); box-shadow:0 8px 30px rgba(0,0,0,.3); }
-  .card .icon { font-size:36px; margin-bottom:14px; }
-  .card h2 { font-size:18px; font-weight:700; margin-bottom:6px; }
-  .card p { color:var(--text-dim); font-size:13px; line-height:1.6; }
-  .card .tag { display:inline-block; margin-top:14px; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; }
-  .tag.blue { background:rgba(108,140,255,.12); color:var(--accent); }
-  .tag.green { background:rgba(74,222,128,.12); color:var(--green); }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Function Calling — Teaching Demos</title>
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-  <h1>LLM <span>Function Calling</span></h1>
-  <p class="subtitle">Interactive teaching demos showing the exact JSON tokens flowing between applications, LLMs, and external tools.</p>
-  <div class="cards">
-    <a class="card" href="function-calls.html">
-      <div class="icon">🔧</div>
-      <h2>Single & Parallel Function Calls</h2>
-      <p>Step through the full request/response cycle: tool definitions, tool_use blocks, tool_result payloads, and error handling. Includes single-call, parallel-call, and error scenarios.</p>
-      <span class="tag blue">3 scenarios</span>
-    </a>
-    <a class="card" href="agent-loop.html">
-      <div class="icon">🔄</div>
-      <h2>Agent Loop</h2>
-      <p>Watch an autonomous agent initialize, reason, call tools across multiple turns, and decide when to terminate — with the full token-level payloads at every iteration of the loop.</p>
-      <span class="tag green">2 scenarios</span>
-    </a>
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">LLM<span>Demos</span></a>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="tokens.html">Tokens & Internals</a>
+      <a href="function.html" class="active">Function Calling</a>
+      <a href="agent.html">Agent Loop</a>
+    </div>
+  </nav>
+
+  <header class="app-header">
+    <h1>LLM <span>Function Calling</span> — Token Demo</h1>
+    <p>Watch the exact tokens that the LLM processes and emits during tool use and function calls.</p>
+  </header>
+
+  <div class="layout">
+    <div class="panel-left">
+      <div class="section-title">Scenarios</div>
+      <div id="scenario-list"></div>
+      <div class="controls">
+        <div class="speed-control">
+          <span>Speed</span>
+          <input type="range" id="speed" min="1" max="5" value="3">
+          <span id="speed-label">1×</span>
+        </div>
+        <button class="controls button btn-play" id="btn-play" disabled>▶ Auto-Play All Steps</button>
+        <button class="controls button btn-step" id="btn-step" disabled>⏭ Next Step</button>
+        <button class="controls button btn-reset" id="btn-reset">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="panel-right">
+      <div class="step-indicator" id="step-indicator"></div>
+      <div class="messages-area" id="messages-area">
+        <div class="empty-state">
+          <div>
+            <div class="big">⬅</div>Pick a scenario and hit play<br>to watch the token flow.
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <script>
+    const COLORS = ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#14b8a6","#f97316","#3b82f6","#84cc16"];
+
+    // ── Scenario data ──────────────────────────────────────────────
+    const SCENARIOS = [
+      {
+        id: "weather",
+        label: "Get Weather",
+        desc: "User asks for weather → LLM calls get_weather → returns result",
+        userQuery: "What's the weather like in San Francisco right now?",
+        steps: [
+          {
+            name: "App → LLM (Initial Prompt)",
+            type: "to-llm",
+            explanation: `The application wraps the <strong>user's query</strong> and <strong>tool definitions</strong> into a specific template. This is the raw text (sequence of tokens) that the transformer actually "reads". Notice the special markers like <code class="special">&lt;|system|&gt;</code> and <code class="special">&lt;|user|&gt;</code>.`,
+            tokens: [
+              { text: "[BOS]", type: "special" },
+              { text: "<|system|>", type: "special" },
+              { text: " You are a helpful assistant with access to tools. Available: get_weather(location, unit).", type: "text" },
+              { text: "<|user|>", type: "special" },
+              { text: " What's the weather like in San Francisco right now?", type: "text" },
+              { text: "<|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Tool Call Emission)",
+            type: "from-llm",
+            explanation: `The LLM generates text until it decides to use a tool. It emits a special <code class="special">&lt;|tool_call|&gt;</code> token followed by JSON-formatted arguments. It then stops generating and waits for the app's response.`,
+            tokens: [
+              { text: " I'll check the current weather in San Francisco for you. ", type: "text" },
+              { text: "<|tool_call|>", type: "special" },
+              { text: ' {"name": "get_weather", "input": {"location": "San Francisco, CA", "unit": "fahrenheit"}}', type: "json" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          },
+          {
+            name: "App executes tool",
+            type: "tool-exec",
+            explanation: `The <strong>application</strong> parses that JSON, runs the function, and gets a result. This step happens outside the LLM, but the result will be tokenized and fed back in the next step.`,
+            tokens: [
+              { text: "// App calling get_weather...", type: "comment" },
+              { text: "Result: 62°F, Partly cloudy", type: "text" }
+            ]
+          },
+          {
+            name: "App → LLM (Feeding Tool Result)",
+            type: "to-llm",
+            explanation: `The full history is sent back, now including the <code class="special">&lt;|tool_result|&gt;</code>. This allows the LLM's attention mechanism to "look back" at the data it requested.`,
+            tokens: [
+              { text: "...(previous tokens)...", type: "comment" },
+              { text: "<|tool_result|>", type: "special" },
+              { text: ' {"temperature": 62, "condition": "Partly cloudy"}', type: "json" },
+              { text: "<|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Final Answer)",
+            type: "final",
+            explanation: `Having "read" the tool output, the LLM now generates the final response tokens for the user.`,
+            tokens: [
+              { text: " It's a mild day in San Francisco! The current temperature is 62°F with partly cloudy skies.", type: "text" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          }
+        ]
+      },
+      {
+        id: "multi",
+        label: "Parallel Tool Calls",
+        desc: "LLM calls two tools at once → both results sent back together",
+        userQuery: "Compare the weather in Tokyo and London.",
+        steps: [
+          {
+            name: "App → LLM (Initial Prompt)",
+            type: "to-llm",
+            explanation: `Initial context with user query.`,
+            tokens: [
+              { text: "[BOS]", type: "special" },
+              { text: "<|system|>", type: "special" },
+              { text: " Tools: get_weather(location).", type: "text" },
+              { text: "<|user|>", type: "special" },
+              { text: " Compare the weather in Tokyo and London.", type: "text" },
+              { text: "<|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Double Tool Call)",
+            type: "from-llm",
+            explanation: `The LLM emits two tool call blocks back-to-back.`,
+            tokens: [
+              { text: " Let me look up both cities. ", type: "text" },
+              { text: "<|tool_call|>", type: "special" },
+              { text: ' {"name": "get_weather", "input": {"location": "Tokyo"}}', type: "json" },
+              { text: "<|tool_call|>", type: "special" },
+              { text: ' {"name": "get_weather", "input": {"location": "London"}}', type: "json" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          },
+          {
+            name: "App executes BOTH tools",
+            type: "tool-exec",
+            explanation: `App fetches data for both cities in parallel.`,
+            tokens: [
+              { text: "// Tokyo: 28°C, Humid", type: "text" },
+              { text: "// London: 14°C, Overcast", type: "text" }
+            ]
+          },
+          {
+            name: "App → LLM (Multi-Result)",
+            type: "to-llm",
+            explanation: `Both results are provided to the model.`,
+            tokens: [
+              { text: "...context...", type: "comment" },
+              { text: "<|tool_result|>", type: "special" },
+              { text: ' {"city": "Tokyo", "temp": 28}', type: "json" },
+              { text: "<|tool_result|>", type: "special" },
+              { text: ' {"city": "London", "temp": 14}', type: "json" },
+              { text: "<|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Synthesis)",
+            type: "final",
+            explanation: `The model compares the two results.`,
+            tokens: [
+              { text: " Tokyo is much warmer at 28°C compared to London's 14°C.", type: "text" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          }
+        ]
+      },
+      {
+        id: "error",
+        label: "Tool Error Handling",
+        desc: "Tool call fails → LLM gracefully handles the error",
+        userQuery: "What's the stock price of XYZFAKE?",
+        steps: [
+          {
+            name: "App → LLM (Prompt)",
+            type: "to-llm",
+            explanation: `System prompt includes stock tools.`,
+            tokens: [
+              { text: "[BOS]", type: "special" },
+              { text: "<|system|>", type: "special" },
+              { text: " Tools: get_stock(ticker).", type: "text" },
+              { text: " <|user|>", type: "special" },
+              { text: " What's the stock price of XYZFAKE?", type: "text" },
+              { text: " <|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Attempt Tool)",
+            type: "from-llm",
+            explanation: `LLM tries to call the tool with the provided ticker.`,
+            tokens: [
+              { text: "<|tool_call|>", type: "special" },
+              { text: ' {"ticker": "XYZFAKE"}', type: "json" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          },
+          {
+            name: "App executes (FAIL)",
+            type: "tool-exec",
+            explanation: `The external API returns an error message.`,
+            tokens: [
+              { text: "!! Error: Ticker not found", type: "comment" }
+            ]
+          },
+          {
+            name: "App → LLM (Error Signal)",
+            type: "to-llm",
+            explanation: `The error is fed back to the LLM using a result block with an error flag.`,
+            tokens: [
+              { text: "...context...", type: "comment" },
+              { text: "<|tool_result|>", type: "special" },
+              { text: ' {"error": "Ticker not found"}', type: "json" },
+              { text: "<|assistant|>", type: "special" }
+            ]
+          },
+          {
+            name: "LLM → App (Correction)",
+            type: "final",
+            explanation: `The LLM acknowledges the failure and explains it to the user.`,
+            tokens: [
+              { text: " I couldn't find that stock. Please check the ticker symbol.", type: "text" },
+              { text: "<|eot_id|>", type: "special" }
+            ]
+          }
+        ]
+      }
+    ];
+
+    function escHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function renderTokens(tokens) {
+      return (tokens || []).map((t, i) => {
+        const text = typeof t === 'string' ? t : t.text;
+        const type = typeof t === 'string' ? 'text' : (t.type || 'text');
+        const display = text.replace(/ /g, "·").replace(/\n/g, "↵");
+        
+        let style = "";
+        const color = COLORS[i % COLORS.length];
+
+        if (type === 'special') {
+          style = `background: rgba(108,140,255,0.15); color: #6c8cff; border: 1px solid rgba(108,140,255,0.3); font-weight: 700;`;
+        } else if (type === 'json') {
+          style = `background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.2); font-family: var(--mono);`;
+        } else if (type === 'comment') {
+          style = `background: transparent; color: #555b73; font-style: italic; border: none;`;
+        } else {
+          style = `background: ${color}22; color: ${color}; border: 1px solid transparent;`;
+        }
+          
+        return `<span class="tok" style="${style} padding: 3px 6px; border-radius: 4px; margin: 2px; display: inline-block; font-size: 13px;">${escHtml(display)}</span>`;
+      }).join('');
+    }
+
+    // ── State ──────────────────────────────────────────────────────
+    let currentScenario = null;
+    let currentStep = 0;
+    let playing = false;
+    let playTimer = null;
+    const speedMap = { 1: 3000, 2: 2000, 3: 1200, 4: 700, 5: 350 };
+
+    function getDelay() { return speedMap[+document.getElementById('speed').value]; }
+
+    // ── Rendering ──────────────────────────────────────────────────
+    function renderScenarios() {
+      const list = document.getElementById('scenario-list');
+      list.innerHTML = '';
+      SCENARIOS.forEach(s => {
+        const b = document.createElement('button');
+        b.className = 'scenario-btn' + (currentScenario?.id === s.id ? ' active' : '');
+        b.innerHTML = `<div class="label">${s.label}</div><div class="desc">${s.desc}</div>`;
+        b.onclick = () => selectScenario(s);
+        list.appendChild(b);
+      });
+    }
+
+    function selectScenario(s) {
+      stopPlay();
+      currentScenario = s;
+      currentStep = 0;
+      renderScenarios();
+      renderStepIndicator();
+      document.getElementById('messages-area').innerHTML =
+        `<div class="empty-state"><div><div class="big">▶</div>Ready. Hit <strong>Auto-Play</strong> or <strong>Next Step</strong>.</div></div>`;
+      updateButtons();
+    }
+
+    function renderStepIndicator() {
+      const bar = document.getElementById('step-indicator');
+      if (!currentScenario) { bar.innerHTML = ''; return; }
+      bar.innerHTML = currentScenario.steps.map((s, i) => {
+        let cls = 'step-pill';
+        if (i < currentStep) cls += ' done';
+        else if (i === currentStep && currentStep > 0) cls += ' active';
+        return `<div class="${cls}">${i + 1}. ${s.name}</div>`;
+      }).join('');
+    }
+
+    function renderStep(step) {
+      const area = document.getElementById('messages-area');
+      if (currentStep === 1) area.innerHTML = ''; // clear empty state on first real step
+
+      const typeMap = { 'to-llm': 'to-llm', 'from-llm': 'from-llm', 'tool-exec': 'tool-exec', 'final': 'final' };
+      const arrowMap = { 'to-llm': '📤', 'from-llm': '📥', 'tool-exec': '🔧', 'final': '✅' };
+
+      const block = document.createElement('div');
+      block.className = `msg-block ${typeMap[step.type]}`;
+      block.innerHTML = `
+    <div class="msg-header">
+      <span class="arrow">${arrowMap[step.type]}</span>
+      ${step.name}
+    </div>
+    <div class="msg-body" style="padding: 16px; background: var(--surface); display: flex; flex-wrap: wrap; align-items: flex-start;">
+      ${renderTokens(step.tokens)}
+    </div>
+    <div class="explanation">${step.explanation}</div>
+  `;
+      area.appendChild(block);
+      block.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function advanceStep() {
+      if (!currentScenario || currentStep >= currentScenario.steps.length) return false;
+      if (currentStep === 0) document.getElementById('messages-area').innerHTML = '';
+      renderStep(currentScenario.steps[currentStep]);
+      currentStep++;
+      renderStepIndicator();
+      updateButtons();
+      return currentStep < currentScenario.steps.length;
+    }
+
+    function updateButtons() {
+      const hasScenario = !!currentScenario;
+      const hasMore = hasScenario && currentStep < (currentScenario?.steps.length || 0);
+      document.getElementById('btn-play').disabled = !hasMore || playing;
+      document.getElementById('btn-step').disabled = !hasMore || playing;
+    }
+
+    function startPlay() {
+      if (!currentScenario) return;
+      playing = true;
+      updateButtons();
+      function tick() {
+        if (!playing) return;
+        const more = advanceStep();
+        if (more) playTimer = setTimeout(tick, getDelay());
+        else stopPlay();
+      }
+      tick();
+    }
+    function stopPlay() {
+      playing = false;
+      clearTimeout(playTimer);
+      updateButtons();
+    }
+
+    function reset() {
+      stopPlay();
+      if (currentScenario) selectScenario(currentScenario);
+    }
+
+    // ── Event wiring ───────────────────────────────────────────────
+    document.getElementById('btn-play').onclick = startPlay;
+    document.getElementById('btn-step').onclick = () => advanceStep();
+    document.getElementById('btn-reset').onclick = reset;
+    document.getElementById('speed').oninput = e => {
+      const labels = { 1: '0.3×', 2: '0.6×', 3: '1×', 4: '2×', 5: '3×' };
+      document.getElementById('speed-label').textContent = labels[e.target.value];
+    };
+    document.getElementById('speed-label').textContent = '1×';
+
+    renderScenarios();
+  </script>
 </body>
+
 </html>
