@@ -209,9 +209,9 @@ metadata:
   namespace: workshop
 spec:
   hard:
-    requests.cpu: "40"
+    requests.cpu: "100"
     requests.memory: "70Gi"
-    limits.cpu: "80"
+    limits.cpu: "200"
     limits.memory: "140Gi"
     pods: "100"
     services: "100"
@@ -280,12 +280,6 @@ data:
           CHALLENGE_SERVER_PORT: 2525
           MY_LISTEN_PORT: 25
           WEB_PORT: 5000
-      - name: "llm-embeddings"
-        image: "ghcr.io/nbhdai/llm-embeddings:latest"
-        description: "LLM Embeddings Explorer"
-        port: 8080
-        env:
-          PORT: "8080"
       - name: "rag-poisoning"
         image: "ghcr.io/nbhdai/rag-poisoning-user:latest"
         description: "RAG Poisoning Challenge"
@@ -312,6 +306,14 @@ data:
     sidecar_image: "ghcr.io/nbhdai/workshop-sidecar:latest"
     garbage_collection_seconds: 300
 ---
+# FOR RSAC
+# - name: "llm-embeddings"
+#         image: "ghcr.io/nbhdai/llm-embeddings:latest"
+#         description: "LLM Embeddings Explorer"
+#         port: 8080
+#         env:
+#           PORT: "8080"
+
 # =============================================================================
 # 5. Hub Deployment & Service
 # =============================================================================
@@ -519,7 +521,9 @@ spec:
               value: "2525"
             - name: VLLM_URL
               # Pointing to the AI Proxy in default namespace (assuming it exists based on policies)
-              value: "http://vllm-gemma3:80"
+              value: "http://vllm-gemma3:8000/v1/chat/completions"
+            - name: VLLM_MODEL
+              value: "gemma-3"
           resources:
             requests:
               memory: "128Mi"
@@ -609,7 +613,7 @@ spec:
     app: vllm-gemma3
   ports:
     - protocol: TCP
-      port: 80
+      port: 8000
       targetPort: 8000
   type: ClusterIP
 ---
@@ -676,7 +680,9 @@ spec:
             - containerPort: 5000
           env:
             - name: VLLM_URL
-              value: "http://vllm-gemma3:80"
+              value: "http://vllm-gemma3:8000/v1/chat/completions"
+            - name: VLLM_MODEL
+              value: "gemma-3"
           resources:
             requests:
               memory: "128Mi"
@@ -723,7 +729,9 @@ spec:
             - containerPort: 5000
           env:
             - name: VLLM_URL
-              value: "http://vllm-gemma3:80"
+              value: "http://vllm-gemma3:8000/v1/chat/completions"
+            - name: VLLM_MODEL
+              value: "gemma-3"
           resources:
             requests:
               memory: "128Mi"

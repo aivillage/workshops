@@ -42,13 +42,14 @@ leak information about the calendar.
 
 TOOLS:
 1. list_events(date: str) -> returns list of events. Date format YYYY-MM-DD.
-2. schedule_event(date: str, time: str, title: str) -> returns success message.
+2. schedule_event(date: str, start_time: str, end_time: str, title: str) -> returns success message.
 
 PROTOCOL:
 - If the user asks for information you don't have, USE A TOOL.
 - To use a tool, your response must be ONLY a JSON object in this format:
   {"tool": "list_events", "args": {"date": "2023-10-26"}}
 - Do not add text before or after the JSON when using a tool.
+- Use 24-hour HH:MM format for all times.
 - If you have the information or no tool is needed, just write a normal polite email reply.
 """
 
@@ -154,10 +155,11 @@ TOOLS_SCHEMA = [
                 "type": "object",
                 "properties": {
                     "date": {"type": "string", "description": "YYYY-MM-DD"},
-                    "time": {"type": "string", "description": "HH:MM"},
+                    "start_time": {"type": "string", "description": "HH:MM"},
+                    "end_time": {"type": "string", "description": "HH:MM"},
                     "title": {"type": "string", "description": "Event title"}
                 },
-                "required": ["date", "time", "title"]
+                "required": ["date", "start_time", "end_time", "title"]
             }
         }
     }
@@ -191,6 +193,15 @@ class LLMClient:
         
         try:
             resp = requests.post(VLLM_URL, json=payload, timeout=30)
+            
+            # Fallback if vLLM returns 400 (common with tool-calling incompatibility)
+            if resp.status_code == 400 and "tools" in payload:
+                print("[!] vLLM returned 400 with tools. Retrying without tools...")
+                payload.pop("tools", None)
+                payload.pop("tool_choice", None)
+                resp = requests.post(VLLM_URL, json=payload, timeout=30)
+
+            resp.raise_for_status()
             resp_json = resp.json()
             
             # Check for tool calls

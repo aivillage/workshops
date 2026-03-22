@@ -27,7 +27,6 @@ model = AutoModelForCausalLM.from_pretrained(
 model.eval()
 
 input_embed_weight = model.model.embed_tokens.weight
-output_embed_weight = model.lm_head.weight
 VOCAB_SIZE = int(input_embed_weight.shape[0])
 HIDDEN_DIM = int(input_embed_weight.shape[1])
 print(f"Model loaded — vocab {VOCAB_SIZE}, dim {HIDDEN_DIM}, device {DEVICE}")
@@ -42,17 +41,10 @@ def index():
 
 def fft_top_k_matrix(matrix: np.ndarray, k: int = 20):
     """FFT each row of (N, hidden_dim), return (N, k) magnitudes + freq indices."""
-    spectra = np.fft.rfft(matrix, axis=1)
-    mags = np.abs(spectra)
-    # Pick top-k frequencies by mean magnitude across all tokens
-    mean_mags = mags.mean(axis=0)
-    top_freqs = np.argsort(mean_mags)[::-1][:k].tolist()
-    top_freqs.sort()
-    # Extract those columns: (N, k)
-    reduced = mags[:, top_freqs]
+    spectra = np.abs(np.fft.rfft(matrix, axis=1))[:,:k]
+
     return {
-        "freqs": top_freqs,
-        "values": reduced.round(6).tolist(),
+        "values": spectra.round(6).tolist(),
     }
 
 
@@ -77,14 +69,13 @@ def analyze():
         return jsonify({"error": "text too long (max 2000 chars)"}), 400
 
     # 1 — Tokenize
-    enc = tokenizer(text, return_tensors="pt", add_special_tokens=False)
+    enc = tokenizer(text, return_tensors="pt", add_special_tokens=True)
     ids = enc["input_ids"][0].tolist()
     tokens = [{"text": tokenizer.decode([tid]), "id": tid} for tid in ids]
 
     # 2 — Gather embedding matrices (N x hidden_dim)
     with torch.no_grad():
         input_embs = input_embed_weight[ids].float().cpu().numpy()   # (N, H)
-        lmhead_embs = output_embed_weight[ids].float().cpu().numpy() # (N, H)
 
     # 3 — Forward pass: hidden states + logits
     with torch.no_grad():
@@ -107,14 +98,12 @@ def analyze():
     # 4 — FFT reduce: (N, hidden_dim) → (N, 20)
     fft_input = fft_top_k_matrix(input_embs, 20)
     fft_output_hidden = fft_top_k_matrix(output_hidden, 20)
-    fft_lmhead = fft_top_k_matrix(lmhead_embs, 20)
 
     return jsonify({
         "tokens": tokens,
         "fft": {
             "input_embed": fft_input,
             "output_hidden": fft_output_hidden,
-            "lm_head": fft_lmhead,
         },
         "logits": logits_list,
         "model_path": MODEL_PATH,

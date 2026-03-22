@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Loop — Token-Level Demo</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232734;
+    --border: #2e3346;
+    --text: #e1e4ed;
+    --text-dim: #8a8fa8;
+    --accent: #6c8cff;
+    --accent-dim: #3d5abf;
+    --green: #4ade80;
+    --green-dim: #166534;
+    --orange: #fb923c;
+    --orange-dim: #7c3a12;
+    --pink: #f472b6;
+    --pink-dim: #831843;
+    --yellow: #facc15;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; }
+
+  header { padding:20px 32px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:20px; font-weight:700; }
+  header h1 span { color:var(--green); }
+  header p { color:var(--text-dim); font-size:13px; }
+  header a { color:var(--accent); text-decoration:none; font-size:13px; margin-left:auto; }
+  header a:hover { text-decoration:underline; }
+
+  .layout { display:flex; height:calc(100vh - 73px); }
+
+  .panel-left { width:360px; min-width:300px; border-right:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; }
+  .section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:var(--text-dim); padding:16px 20px 8px; }
+
+  .scenario-btn {
+    display:block; width:calc(100% - 24px); margin:4px 12px; padding:12px 16px;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-size:13px; cursor:pointer; text-align:left; transition:all .15s;
+  }
+  .scenario-btn:hover { border-color:var(--accent-dim); background:var(--surface2); }
+  .scenario-btn.active { border-color:var(--green); background:rgba(74,222,128,.06); }
+  .scenario-btn .label { font-weight:600; margin-bottom:2px; }
+  .scenario-btn .desc { color:var(--text-dim); font-size:11px; }
+
+  /* Loop visualizer */
+  .loop-viz { padding:16px 20px; border-top:1px solid var(--border); }
+  .loop-viz-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-dim); margin-bottom:10px; }
+  .loop-track { display:flex; flex-direction:column; gap:4px; }
+  .loop-iter {
+    display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px;
+    font-size:11px; font-family:var(--mono); background:var(--surface); border:1px solid var(--border);
+    transition:all .25s;
+  }
+  .loop-iter.active { border-color:var(--cyan); background:rgba(34,211,238,.06); }
+  .loop-iter.done { border-color:var(--green-dim); opacity:.7; }
+  .loop-iter .iter-label { color:var(--text-dim); min-width:22px; }
+  .loop-iter .iter-action { color:var(--text); flex:1; }
+  .loop-iter .iter-badge {
+    padding:2px 7px; border-radius:4px; font-size:9px; font-weight:700; text-transform:uppercase;
+  }
+  .badge-tool { background:rgba(251,146,60,.15); color:var(--orange); }
+  .badge-end { background:rgba(74,222,128,.15); color:var(--green); }
+  .badge-init { background:rgba(108,140,255,.15); color:var(--accent); }
+
+  .controls { padding:16px 20px; border-top:1px solid var(--border); margin-top:auto; }
+  .controls button {
+    width:100%; padding:10px; border-radius:8px; border:none; font-size:14px; font-weight:600;
+    cursor:pointer; transition:all .15s;
+  }
+  .btn-play { background:var(--green); color:#000; margin-bottom:8px; }
+  .btn-play:hover { background:#38c96e; }
+  .btn-play:disabled { opacity:.4; cursor:default; }
+  .btn-step { background:var(--surface2); color:var(--text); border:1px solid var(--border) !important; }
+  .btn-step:hover { border-color:var(--green) !important; }
+  .btn-step:disabled { opacity:.4; cursor:default; }
+  .btn-reset { background:transparent; color:var(--text-dim); border:1px solid var(--border) !important; margin-top:8px; font-size:12px; }
+  .speed-control { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:var(--text-dim); font-size:12px; }
+  .speed-control input { flex:1; accent-color:var(--green); }
+
+  /* Right panel */
+  .panel-right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+
+  .step-indicator {
+    display:flex; padding:12px 24px; gap:6px; border-bottom:1px solid var(--border);
+    overflow-x:auto; flex-shrink:0; flex-wrap:wrap;
+  }
+  .step-pill {
+    padding:5px 12px; border-radius:20px; font-size:10px; font-weight:600;
+    white-space:nowrap; border:1px solid var(--border); color:var(--text-dim);
+    background:var(--surface); transition:all .3s;
+  }
+  .step-pill.active { border-color:var(--cyan); color:var(--cyan); background:rgba(34,211,238,.08); }
+  .step-pill.done { border-color:var(--green-dim); color:var(--green); background:rgba(74,222,128,.06); }
+  .step-pill.separator {
+    border:none; background:none; color:var(--orange); font-weight:800; font-size:12px; padding:5px 4px;
+  }
+
+  .messages-area { flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:16px; }
+
+  .msg-block { border-radius:10px; border:1px solid var(--border); overflow:hidden; animation:fadeSlide .35s ease; }
+  @keyframes fadeSlide { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+
+  .msg-header {
+    display:flex; align-items:center; gap:8px; padding:10px 16px;
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.8px;
+  }
+
+  .msg-block.init .msg-header { background:rgba(108,140,255,.08); color:var(--accent); }
+  .msg-block.init { border-color:rgba(108,140,255,.2); }
+  .msg-block.to-llm .msg-header { background:rgba(34,211,238,.08); color:var(--cyan); }
+  .msg-block.to-llm { border-color:rgba(34,211,238,.2); }
+  .msg-block.from-llm .msg-header { background:rgba(74,222,128,.08); color:var(--green); }
+  .msg-block.from-llm { border-color:rgba(74,222,128,.2); }
+  .msg-block.tool-exec .msg-header { background:rgba(251,146,60,.08); color:var(--orange); }
+  .msg-block.tool-exec { border-color:rgba(251,146,60,.2); }
+  .msg-block.final .msg-header { background:rgba(244,114,182,.08); color:var(--pink); }
+  .msg-block.final { border-color:rgba(244,114,182,.2); }
+  .msg-block.loop-marker .msg-header { background:rgba(250,204,21,.08); color:var(--yellow); }
+  .msg-block.loop-marker { border-color:rgba(250,204,21,.25); }
+
+  .json-block {
+    margin:0; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.7;
+    white-space:pre-wrap; word-break:break-word; background:var(--surface); color:var(--text-dim);
+    overflow-x:auto;
+  }
+  .json-block .key { color:var(--accent); }
+  .json-block .str { color:var(--green); }
+  .json-block .num { color:var(--orange); }
+  .json-block .bool { color:var(--pink); }
+  .json-block .null { color:var(--red); }
+  .json-block .comment { color:#555b73; font-style:italic; }
+
+  .explanation {
+    padding:12px 16px; font-size:12px; color:var(--text-dim); line-height:1.6;
+    border-top:1px solid var(--border); background:rgba(255,255,255,.015);
+  }
+  .explanation strong { color:var(--text); }
+  .explanation code { font-family:var(--mono); font-size:11px; background:var(--surface2); padding:1px 5px; border-radius:3px; color:var(--cyan); }
+
+  .pseudocode {
+    margin:0; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.8;
+    background:var(--surface); color:var(--text-dim); white-space:pre-wrap;
+  }
+  .pseudocode .kw { color:var(--pink); font-weight:700; }
+  .pseudocode .fn { color:var(--accent); }
+  .pseudocode .cm { color:#555b73; font-style:italic; }
+  .pseudocode .hl { background:rgba(250,204,21,.1); display:inline; padding:1px 3px; border-radius:2px; }
+
+  .empty-state {
+    flex:1; display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim); font-size:14px; text-align:center; padding:40px;
+  }
+  .empty-state .big { font-size:40px; margin-bottom:12px; }
+
+  @media (max-width:800px) {
+    .layout { flex-direction:column; height:auto; }
+    .panel-left { width:100%; border-right:none; border-bottom:1px solid var(--border); max-height:300px; }
+    .panel-right { min-height:60vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agent <span>Loop</span> — Token Demo</h1>
+  <p>Watch an agent initialize, iterate, call tools, and decide when to stop.</p>
+  <a href="index.html">← Back to demos</a>
+</header>
+
+<div class="layout">
+  <div class="panel-left">
+    <div class="section-title">Scenarios</div>
+    <div id="scenario-list"></div>
+
+    <div class="loop-viz" id="loop-viz" style="display:none">
+      <div class="loop-viz-title">Loop Iterations</div>
+      <div class="loop-track" id="loop-track"></div>
+    </div>
+
+    <div class="controls">
+      <div class="speed-control">
+        <span>Speed</span>
+        <input type="range" id="speed" min="1" max="5" value="3">
+        <span id="speed-label">1×</span>
+      </div>
+      <button class="btn-play" id="btn-play" disabled>▶ Auto-Play All Steps</button>
+      <button class="btn-step" id="btn-step" disabled>⏭ Next Step</button>
+      <button class="btn-reset" id="btn-reset">↺ Reset</button>
+    </div>
+  </div>
+
+  <div class="panel-right">
+    <div class="step-indicator" id="step-indicator"></div>
+    <div class="messages-area" id="messages-area">
+      <div class="empty-state"><div><div class="big">⬅</div>Pick a scenario to watch<br>the agent loop in action.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SCENARIOS = [
+  {
+    id: "research",
+    label: "Research Agent",
+    desc: "Agent searches, reads, and synthesizes — 3 loop iterations before terminating",
+    iterations: [
+      { label: "Init", action: "System prompt + tools + user goal", badge: "init", badgeClass: "badge-init" },
+      { label: "Iter 1", action: "LLM calls web_search", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 2", action: "LLM calls read_page", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 3", action: "LLM returns final answer", badge: "end", badgeClass: "badge-end" },
+    ],
+    steps: [
+      // ── INIT ──
+      {
+        name: "Initialization — Agent Pseudocode",
+        type: "init",
+        loopIdx: 0,
+        explanation: `This is the <strong>agent loop skeleton</strong>. The key insight: an agent is just a <strong>while loop</strong> that keeps calling the LLM until the LLM decides to stop. The application code controls the loop; the LLM controls <em>what happens</em> each iteration. The <code>max_iterations</code> guard prevents runaway loops.`,
+        pseudocode: true,
+        pseudoHtml: `<span class="kw">function</span> <span class="fn">runAgent</span>(userGoal, tools, maxIterations=10) {
+  messages = [
+    { role: <span class="str">"user"</span>, content: userGoal }
+  ]
+
+  <span class="kw">for</span> i <span class="kw">in</span> range(maxIterations):       <span class="cm">// guard rail</span>
+    <span class="hl">response = <span class="fn">callLLM</span>(messages, tools)</span>  <span class="cm">// ← the LLM call</span>
+
+    <span class="kw">if</span> response.stop_reason == <span class="str">"end_turn"</span>:  <span class="cm">// LLM is done</span>
+      <span class="kw">return</span> response                       <span class="cm">// ✅ terminate</span>
+
+    <span class="kw">if</span> response.stop_reason == <span class="str">"tool_use"</span>:  <span class="cm">// LLM wants a tool</span>
+      tool_calls = extractToolCalls(response)
+      results = <span class="fn">executeTools</span>(tool_calls)    <span class="cm">// app runs the tool</span>
+      messages.append(response)               <span class="cm">// add assistant turn</span>
+      messages.append(toolResultMsg(results)) <span class="cm">// add tool results</span>
+      <span class="kw">continue</span>                              <span class="cm">// 🔄 next iteration</span>
+
+  <span class="kw">raise</span> Error(<span class="str">"Max iterations reached"</span>)    <span class="cm">// safety stop</span>`
+      },
+      {
+        name: "Init — First API Call (System + Tools + User Goal)",
+        type: "to-llm",
+        loopIdx: 0,
+        explanation: `The agent loop begins. The app sends the <strong>system prompt</strong> (which gives the LLM its persona and instructions), the <strong>tool definitions</strong>, and the <strong>user's goal</strong>. This is iteration 0 — the LLM hasn't spoken yet.`,
+        json: {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: "You are a research assistant. Use the provided tools to find accurate, up-to-date information. Synthesize your findings into a clear answer. Only respond when you have enough information.",
+          tools: [
+            {
+              name: "web_search",
+              description: "Search the web for current information.",
+              input_schema: { type:"object", properties:{ query:{ type:"string" } }, required:["query"] }
+            },
+            {
+              name: "read_page",
+              description: "Fetch and read the contents of a URL.",
+              input_schema: { type:"object", properties:{ url:{ type:"string" } }, required:["url"] }
+            }
+          ],
+          messages: [
+            { role: "user", content: "What were the key announcements at the latest OpenAI DevDay?" }
+          ]
+        }
+      },
+      // ── ITERATION 1 ──
+      {
+        name: "Iter 1 — LLM responds: calls web_search",
+        type: "from-llm",
+        loopIdx: 1,
+        separator: "Loop Iteration 1",
+        explanation: `The LLM's first move: it decides it needs to <strong>search the web</strong>. Notice <code>stop_reason: "tool_use"</code> — this is the signal that tells the agent loop to <strong>continue</strong> rather than terminate. The LLM is steering the agent's behavior.`,
+        json: {
+          id: "msg_iter1",
+          role: "assistant",
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "I'll search for the latest OpenAI DevDay announcements." },
+            { type: "tool_use", id: "toolu_search_01", name: "web_search", input: { query: "OpenAI DevDay 2024 key announcements" } }
+          ]
+        }
+      },
+      {
+        name: "Iter 1 — App executes web_search",
+        type: "tool-exec",
+        loopIdx: 1,
+        explanation: `The app's agent loop extracts the tool call, executes it against the real search API, and gets results. The LLM never made this network call — <strong>the app did</strong>.`,
+        json: {
+          _comment: "// Agent loop extracts tool call and executes:",
+          tool: "web_search",
+          input: { query: "OpenAI DevDay 2024 key announcements" },
+          _result_comment: "// Search API returns:",
+          result: {
+            results: [
+              { title: "OpenAI DevDay 2024: Everything Announced", url: "https://techblog.example.com/openai-devday-2024", snippet: "OpenAI announced GPT-4 Turbo, the Assistants API, GPT-4 Vision, DALL-E 3 API, and custom GPTs..." },
+              { title: "DevDay Recap — Official OpenAI Blog", url: "https://openai.example.com/blog/devday-recap", snippet: "Key themes included lower prices, longer context windows, and new multimodal capabilities..." }
+            ]
+          }
+        }
+      },
+      {
+        name: "Iter 1 — App sends tool result back to LLM",
+        type: "to-llm",
+        loopIdx: 1,
+        explanation: `The agent loop appends the <strong>assistant's message</strong> (with the tool_use) and a <strong>tool_result</strong> to the conversation, then calls the LLM again. Notice how the <strong>messages array grows</strong> each iteration — this is how the agent builds up context.`,
+        json: {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: "You are a research assistant. ...",
+          tools: ["... (same tools)"],
+          messages: [
+            { role: "user", content: "What were the key announcements at the latest OpenAI DevDay?" },
+            {
+              role: "assistant",
+              content: [
+                { type: "text", text: "I'll search for the latest OpenAI DevDay announcements." },
+                { type: "tool_use", id: "toolu_search_01", name: "web_search", input: { query: "OpenAI DevDay 2024 key announcements" } }
+              ]
+            },
+            {
+              role: "user",
+              content: [
+                { type: "tool_result", tool_use_id: "toolu_search_01", content: "{\"results\":[{\"title\":\"OpenAI DevDay 2024: Everything Announced\",\"url\":\"https://techblog.example.com/openai-devday-2024\",\"snippet\":\"OpenAI announced GPT-4 Turbo, the Assistants API, GPT-4 Vision...\"},{\"title\":\"DevDay Recap\",\"url\":\"https://openai.example.com/blog/devday-recap\",\"snippet\":\"Key themes included lower prices, longer context windows...\"}]}" }
+              ]
+            }
+          ]
+        }
+      },
+      // ── ITERATION 2 ──
+      {
+        name: "Iter 2 — LLM responds: calls read_page",
+        type: "from-llm",
+        loopIdx: 2,
+        separator: "Loop Iteration 2",
+        explanation: `The LLM saw the search snippets but wants <strong>more detail</strong>. It autonomously decides to read the full article — a second tool call, a second loop iteration. This is the agent's <strong>planning ability</strong>: it chose which result to deep-dive into.`,
+        json: {
+          id: "msg_iter2",
+          role: "assistant",
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "The search results look promising. Let me read the full article for detailed announcements." },
+            { type: "tool_use", id: "toolu_read_01", name: "read_page", input: { url: "https://techblog.example.com/openai-devday-2024" } }
+          ]
+        }
+      },
+      {
+        name: "Iter 2 — App executes read_page",
+        type: "tool-exec",
+        loopIdx: 2,
+        explanation: `The app fetches the page content. In a real agent, you'd truncate or summarize very long pages to stay within context window limits.`,
+        json: {
+          tool: "read_page",
+          input: { url: "https://techblog.example.com/openai-devday-2024" },
+          result: {
+            title: "OpenAI DevDay 2024: Everything Announced",
+            content: "OpenAI's first developer conference featured several major announcements:\n\n1. GPT-4 Turbo — 128K context window, knowledge cutoff April 2024, 3x cheaper input tokens\n2. Assistants API — built-in retrieval, code interpreter, and function calling\n3. GPT-4 Vision — image understanding via the API\n4. DALL-E 3 API — programmatic image generation\n5. Custom GPTs — no-code agent builder for ChatGPT\n6. GPT Store — marketplace launching in 2024\n7. Copyright Shield — legal protection for API users\n8. JSON Mode — guaranteed valid JSON output\n9. Reproducible outputs — seed parameter for determinism\n10. Log probabilities — returning token-level confidence scores"
+          }
+        }
+      },
+      {
+        name: "Iter 2 — App sends tool result back to LLM",
+        type: "to-llm",
+        loopIdx: 2,
+        explanation: `The messages array now has <strong>5 messages</strong> — it's grown across two iterations. Each loop iteration adds an assistant turn and a tool_result turn. This is the agent's accumulated <strong>working memory</strong>.`,
+        json: {
+          _comment: "// messages array now has 5 entries:",
+          messages: [
+            { role: "user", content: "What were the key announcements at the latest OpenAI DevDay?" },
+            { role: "assistant", content: "[... tool_use: web_search ...]" },
+            { role: "user", content: "[... tool_result: search results ...]" },
+            { role: "assistant", content: "[... tool_use: read_page ...]" },
+            {
+              role: "user",
+              content: [
+                { type: "tool_result", tool_use_id: "toolu_read_01", content: "{\"title\":\"OpenAI DevDay 2024: Everything Announced\",\"content\":\"OpenAI's first developer conference featured several major announcements:\\n\\n1. GPT-4 Turbo — 128K context...\\n2. Assistants API...\\n3. GPT-4 Vision...\\n...10. Log probabilities...\"}" }
+              ]
+            }
+          ]
+        }
+      },
+      // ── ITERATION 3 — TERMINATION ──
+      {
+        name: "Iter 3 — LLM responds: FINAL ANSWER (loop terminates)",
+        type: "final",
+        loopIdx: 3,
+        separator: "Loop Iteration 3 — Termination",
+        explanation: `The LLM now has enough information and returns <code>stop_reason: "end_turn"</code>. This is the <strong>termination signal</strong> — the agent loop's <code>if stop_reason == "end_turn": return</code> condition is met. The loop exits and the app delivers this response to the user. The LLM decided on its own when it had enough data to answer.`,
+        json: {
+          id: "msg_iter3_final",
+          role: "assistant",
+          stop_reason: "end_turn",
+          content: [
+            {
+              type: "text",
+              text: "Here are the key announcements from OpenAI DevDay 2024:\n\n**Major Product Launches:**\n• GPT-4 Turbo — 128K context window, updated knowledge, and 3x cheaper input tokens\n• Assistants API — a new framework with built-in retrieval, code interpreter, and function calling\n• Custom GPTs — a no-code builder letting anyone create specialized agents\n• GPT Store — a marketplace for sharing and monetizing Custom GPTs\n\n**API Improvements:**\n• GPT-4 Vision — image understanding capabilities via the API\n• DALL-E 3 API — programmatic image generation\n• JSON Mode — guaranteed valid JSON output\n• Reproducible outputs via a seed parameter\n• Log probabilities for token-level confidence\n\n**Business & Legal:**\n• Copyright Shield — OpenAI will defend and pay costs for copyright claims against API users\n\nThe overarching themes were making models cheaper, more capable (especially multimodal), and easier to customize."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    id: "codefix",
+    label: "Code-Fix Agent",
+    desc: "Agent reads a file, runs tests, edits code, re-runs tests — multi-step autonomy",
+    iterations: [
+      { label: "Init", action: "System prompt + tools + user goal", badge: "init", badgeClass: "badge-init" },
+      { label: "Iter 1", action: "LLM calls read_file", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 2", action: "LLM calls run_tests", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 3", action: "LLM calls edit_file", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 4", action: "LLM calls run_tests (verify)", badge: "tool", badgeClass: "badge-tool" },
+      { label: "Iter 5", action: "LLM returns final summary", badge: "end", badgeClass: "badge-end" },
+    ],
+    steps: [
+      // ── INIT ──
+      {
+        name: "Initialization — Agent Pseudocode",
+        type: "init",
+        loopIdx: 0,
+        explanation: `Same loop structure, but this agent has <strong>coding tools</strong>. The LLM will autonomously decide the order: read code → run tests → diagnose → edit → verify. This is emergent planning — the app doesn't hardcode the sequence.`,
+        pseudocode: true,
+        pseudoHtml: `<span class="cm">// Same loop — different tools, different behavior</span>
+tools = [<span class="fn">read_file</span>, <span class="fn">edit_file</span>, <span class="fn">run_tests</span>]
+messages = [{ role: <span class="str">"user"</span>, content: goal }]
+
+<span class="kw">while</span> iterations &lt; max_iterations:
+    response = <span class="fn">callLLM</span>(messages, tools)
+
+    <span class="kw">if</span> response.stop_reason == <span class="str">"end_turn"</span>:
+        <span class="kw">return</span> response    <span class="cm">// ✅ agent is satisfied</span>
+
+    <span class="cm">// Execute whatever tool(s) the LLM chose</span>
+    <span class="kw">for</span> tool_call <span class="kw">in</span> response.tool_calls:
+        result = <span class="fn">execute</span>(tool_call)
+        messages.append(...)
+
+    iterations += 1       <span class="cm">// 🔄 keep looping</span>`
+      },
+      {
+        name: "Init — First API Call",
+        type: "to-llm",
+        loopIdx: 0,
+        explanation: `The user wants a bug fixed. The app provides three tools: <strong>read_file</strong>, <strong>edit_file</strong>, and <strong>run_tests</strong>. The LLM will figure out the workflow itself.`,
+        json: {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: "You are a senior software engineer. Diagnose and fix bugs methodically: read the code, run tests to confirm the failure, make a targeted fix, then verify tests pass.",
+          tools: [
+            { name: "read_file", description: "Read contents of a file.", input_schema: { type:"object", properties:{ path:{type:"string"} }, required:["path"] } },
+            { name: "edit_file", description: "Replace text in a file.", input_schema: { type:"object", properties:{ path:{type:"string"}, old_text:{type:"string"}, new_text:{type:"string"} }, required:["path","old_text","new_text"] } },
+            { name: "run_tests", description: "Run the test suite.", input_schema: { type:"object", properties:{ test_path:{type:"string"} }, required:["test_path"] } }
+          ],
+          messages: [
+            { role: "user", content: "The test in tests/test_cart.py is failing. The bug is in src/cart.py. Please fix it." }
+          ]
+        }
+      },
+      // ── ITER 1 ──
+      {
+        name: "Iter 1 — LLM calls read_file",
+        type: "from-llm",
+        loopIdx: 1,
+        separator: "Loop Iteration 1",
+        explanation: `First move: <strong>read the source code</strong>. The LLM is following a logical diagnostic process — look at the code before trying to fix anything.`,
+        json: {
+          role: "assistant", stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "Let me start by reading the source file to understand the code." },
+            { type: "tool_use", id: "toolu_r1", name: "read_file", input: { path: "src/cart.py" } }
+          ]
+        }
+      },
+      {
+        name: "Iter 1 — Tool result: file contents",
+        type: "tool-exec",
+        loopIdx: 1,
+        explanation: `The app reads the file from disk and returns its contents.`,
+        json: {
+          tool: "read_file",
+          result: { content: "class Cart:\n    def __init__(self):\n        self.items = []\n\n    def add_item(self, name, price, qty=1):\n        self.items.append({'name': name, 'price': price, 'qty': qty})\n\n    def total(self):\n        return sum(item['price'] * item['qty'] for item in self.items)\n\n    def apply_discount(self, percent):\n        multiplier = percent / 100          # BUG: should be (100 - percent) / 100\n        return self.total() * multiplier" }
+        }
+      },
+      // ── ITER 2 ──
+      {
+        name: "Iter 2 — LLM calls run_tests (confirm failure)",
+        type: "from-llm",
+        loopIdx: 2,
+        separator: "Loop Iteration 2",
+        explanation: `Before fixing, the LLM <strong>runs the tests to confirm the failure</strong>. This is methodical engineering practice — and the LLM chose this order itself.`,
+        json: {
+          role: "assistant", stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "I can see the bug in apply_discount — it's using percent/100 instead of (100-percent)/100. Let me first run the tests to confirm the failure." },
+            { type: "tool_use", id: "toolu_t1", name: "run_tests", input: { test_path: "tests/test_cart.py" } }
+          ]
+        }
+      },
+      {
+        name: "Iter 2 — Tool result: test failure",
+        type: "tool-exec",
+        loopIdx: 2,
+        explanation: `Tests confirm the bug: a 20% discount on $100 returns $20 (the discount amount) instead of $80 (the discounted price).`,
+        json: {
+          tool: "run_tests",
+          result: {
+            passed: 2, failed: 1, total: 3,
+            failures: [
+              { test: "test_apply_discount", message: "AssertionError: expected 80.0 but got 20.0\n  assert Cart().add_item('A',100).apply_discount(20) == 80.0" }
+            ]
+          }
+        }
+      },
+      // ── ITER 3 ──
+      {
+        name: "Iter 3 — LLM calls edit_file (apply fix)",
+        type: "from-llm",
+        loopIdx: 3,
+        separator: "Loop Iteration 3",
+        explanation: `Now the LLM applies a <strong>targeted fix</strong>. It uses the edit_file tool with a precise find-and-replace. Notice how it identified exactly which line to change.`,
+        json: {
+          role: "assistant", stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "Confirmed — the discount multiplier is inverted. Fixing the formula now." },
+            {
+              type: "tool_use", id: "toolu_e1", name: "edit_file",
+              input: {
+                path: "src/cart.py",
+                old_text: "        multiplier = percent / 100          # BUG: should be (100 - percent) / 100",
+                new_text: "        multiplier = (100 - percent) / 100"
+              }
+            }
+          ]
+        }
+      },
+      {
+        name: "Iter 3 — Tool result: edit applied",
+        type: "tool-exec",
+        loopIdx: 3,
+        explanation: `The app applies the text replacement and confirms success.`,
+        json: { tool: "edit_file", result: { success: true, path: "src/cart.py", message: "1 replacement made" } }
+      },
+      // ── ITER 4 ──
+      {
+        name: "Iter 4 — LLM calls run_tests (verify fix)",
+        type: "from-llm",
+        loopIdx: 4,
+        separator: "Loop Iteration 4",
+        explanation: `The LLM <strong>re-runs the tests</strong> to verify its fix. This is critical agent behavior: it doesn't just make a change and assume it worked — it <strong>validates</strong>. The loop continues because <code>stop_reason</code> is still "tool_use".`,
+        json: {
+          role: "assistant", stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "Fix applied. Let me run the tests again to verify." },
+            { type: "tool_use", id: "toolu_t2", name: "run_tests", input: { test_path: "tests/test_cart.py" } }
+          ]
+        }
+      },
+      {
+        name: "Iter 4 — Tool result: all tests pass",
+        type: "tool-exec",
+        loopIdx: 4,
+        explanation: `All 3 tests pass. The LLM will see this and decide it's done.`,
+        json: { tool: "run_tests", result: { passed: 3, failed: 0, total: 3, failures: [] } }
+      },
+      // ── ITER 5 — TERMINATION ──
+      {
+        name: "Iter 5 — LLM returns FINAL ANSWER (loop terminates)",
+        type: "final",
+        loopIdx: 5,
+        separator: "Loop Iteration 5 — Termination",
+        explanation: `The LLM is satisfied: tests pass, the bug is fixed. It returns <code>stop_reason: "end_turn"</code>, which causes the agent loop to <strong>exit</strong> and deliver this summary to the user. Across 5 iterations, the LLM autonomously: read code → ran tests → diagnosed → fixed → verified. The app just ran a while loop.`,
+        json: {
+          role: "assistant",
+          stop_reason: "end_turn",
+          content: [
+            {
+              type: "text",
+              text: "Bug fixed and verified! Here's what was wrong:\n\n**Root cause:** In `cart.py`, the `apply_discount` method was computing `percent / 100` instead of `(100 - percent) / 100`. This meant a 20% discount returned the discount *amount* ($20) rather than the discounted *price* ($80).\n\n**Fix:** Changed `multiplier = percent / 100` → `multiplier = (100 - percent) / 100`\n\n**Verification:** All 3 tests now pass, including `test_apply_discount`."
+            }
+          ]
+        }
+      }
+    ]
+  }
+];
+
+// ── Syntax highlighting ────────────────────────────────────────
+function syntaxHighlight(obj) {
+  let raw = JSON.stringify(obj, null, 2);
+  raw = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  raw = raw.replace(/"([^"\\]*(\\.[^"\\]*)*)"(\s*:)?/g, (m, key, _2, colon) => {
+    if (colon) return `<span class="key">"${key}"</span>:`;
+    return `<span class="str">"${key}"</span>`;
+  });
+  raw = raw.replace(/\b(\d+\.?\d*)\b/g, '<span class="num">$1</span>');
+  raw = raw.replace(/\b(true|false)\b/g, '<span class="bool">$1</span>');
+  raw = raw.replace(/\bnull\b/g, '<span class="null">null</span>');
+  raw = raw.replace(/<span class="key">"(_comment|_result_comment)"<\/span>:\s*<span class="str">"([^"]*)"<\/span>,?/g,
+    '<span class="comment">$2</span>');
+  return raw;
+}
+
+// ── State ──────────────────────────────────────────────────────
+let currentScenario = null;
+let currentStep = 0;
+let playing = false;
+let playTimer = null;
+const speedMap = {1:3000,2:2000,3:1200,4:700,5:350};
+function getDelay(){ return speedMap[+document.getElementById('speed').value]; }
+
+function renderScenarios(){
+  const list = document.getElementById('scenario-list');
+  list.innerHTML = '';
+  SCENARIOS.forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'scenario-btn' + (currentScenario?.id===s.id?' active':'');
+    b.innerHTML = `<div class="label">${s.label}</div><div class="desc">${s.desc}</div>`;
+    b.onclick = () => selectScenario(s);
+    list.appendChild(b);
+  });
+}
+
+function selectScenario(s){
+  stopPlay();
+  currentScenario = s;
+  currentStep = 0;
+  renderScenarios();
+  renderStepIndicator();
+  renderLoopViz();
+  document.getElementById('messages-area').innerHTML =
+    `<div class="empty-state"><div><div class="big">▶</div>Ready. Hit <strong>Auto-Play</strong> or <strong>Next Step</strong>.</div></div>`;
+  updateButtons();
+}
+
+function renderLoopViz(){
+  const viz = document.getElementById('loop-viz');
+  const track = document.getElementById('loop-track');
+  if(!currentScenario){ viz.style.display='none'; return; }
+  viz.style.display='block';
+  const activeLoopIdx = currentStep > 0 ? currentScenario.steps[Math.min(currentStep, currentScenario.steps.length)-1].loopIdx : -1;
+  track.innerHTML = currentScenario.iterations.map((it,i) => {
+    let cls = 'loop-iter';
+    if(i < activeLoopIdx) cls += ' done';
+    else if(i === activeLoopIdx) cls += ' active';
+    return `<div class="${cls}">
+      <span class="iter-label">${it.label}</span>
+      <span class="iter-action">${it.action}</span>
+      <span class="iter-badge ${it.badgeClass}">${it.badge}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderStepIndicator(){
+  const bar = document.getElementById('step-indicator');
+  if(!currentScenario){ bar.innerHTML=''; return; }
+  let html = '';
+  currentScenario.steps.forEach((s,i) => {
+    if(s.separator){
+      html += `<div class="step-pill separator">⟳ ${s.separator}</div>`;
+    }
+    let cls = 'step-pill';
+    if(i < currentStep) cls += ' done';
+    else if(i === currentStep && currentStep > 0) cls += ' active';
+    html += `<div class="${cls}">${s.name.replace(/^Iter \d+ — /,'').replace(/^Init(ialization)? — /,'')}</div>`;
+  });
+  bar.innerHTML = html;
+}
+
+function renderStep(step){
+  const area = document.getElementById('messages-area');
+  if(currentStep === 1) area.innerHTML = '';
+
+  const block = document.createElement('div');
+  block.className = `msg-block ${step.type}`;
+
+  const arrowMap = {'init':'🚀','to-llm':'📤','from-llm':'📥','tool-exec':'🔧','final':'✅','loop-marker':'🔄'};
+
+  let bodyHtml;
+  if(step.pseudocode){
+    bodyHtml = `<div class="pseudocode">${step.pseudoHtml}</div>`;
+  } else {
+    bodyHtml = `<div class="json-block">${syntaxHighlight(step.json)}</div>`;
+  }
+
+  block.innerHTML = `
+    <div class="msg-header">
+      <span>${arrowMap[step.type]||'📋'}</span>
+      ${step.name}
+    </div>
+    <div class="msg-body">${bodyHtml}</div>
+    ${step.explanation ? `<div class="explanation">${step.explanation}</div>` : ''}
+  `;
+  area.appendChild(block);
+  block.scrollIntoView({behavior:'smooth', block:'end'});
+}
+
+function advanceStep(){
+  if(!currentScenario || currentStep >= currentScenario.steps.length) return false;
+  if(currentStep === 0) document.getElementById('messages-area').innerHTML = '';
+  renderStep(currentScenario.steps[currentStep]);
+  currentStep++;
+  renderStepIndicator();
+  renderLoopViz();
+  updateButtons();
+  return currentStep < currentScenario.steps.length;
+}
+
+function updateButtons(){
+  const hasMore = currentScenario && currentStep < (currentScenario?.steps.length||0);
+  document.getElementById('btn-play').disabled = !hasMore || playing;
+  document.getElementById('btn-step').disabled = !hasMore || playing;
+}
+
+function startPlay(){
+  if(!currentScenario) return;
+  playing = true;
+  updateButtons();
+  function tick(){
+    if(!playing) return;
+    const more = advanceStep();
+    if(more) playTimer = setTimeout(tick, getDelay());
+    else stopPlay();
+  }
+  tick();
+}
+function stopPlay(){ playing=false; clearTimeout(playTimer); updateButtons(); }
+function reset(){ stopPlay(); if(currentScenario) selectScenario(currentScenario); }
+
+document.getElementById('btn-play').onclick = startPlay;
+document.getElementById('btn-step').onclick = () => advanceStep();
+document.getElementById('btn-reset').onclick = reset;
+document.getElementById('speed').oninput = e => {
+  const labels = {1:'0.3×',2:'0.6×',3:'1×',4:'2×',5:'3×'};
+  document.getElementById('speed-label').textContent = labels[e.target.value];
+};
+document.getElementById('speed-label').textContent = '1×';
+renderScenarios();
+</script>
+</body>
+</html>
