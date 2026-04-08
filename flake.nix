@@ -46,10 +46,21 @@
                 let
                   scriptName = "upload-${name}";
 
+                  # Shared logic to require a tag argument for individual scripts
+                  tagHandling = ''
+                    if [ $# -eq 0 ]; then
+                      echo "Error: No tag provided."
+                      echo "Usage: ${scriptName} <semver-tag> (e.g., ${scriptName} v0.1.2)"
+                      exit 1
+                    fi
+                    TAG=$1
+                  '';
+
                   dockerBody = ''
-                    echo "--- Processing image: ${name} ---"
-                    LOCAL_TAG="${name}:latest"
-                    REMOTE_TAG="ghcr.io/nbhdai/${name}:latest"
+                    ${tagHandling}
+                    echo "--- Processing image: ${name} (Tag: $TAG) ---"
+                    LOCAL_TAG="${name}:$TAG"
+                    REMOTE_TAG="ghcr.io/nbhdai/${name}:$TAG"
                     CONTEXT_PATH="$ROOT_DIR/${path}"
 
                     echo "Building $LOCAL_TAG from $CONTEXT_PATH..."
@@ -65,9 +76,10 @@
                   '';
 
                   nixBody = ''
-                    echo "--- Processing image: ${name} ---"
-                    LOCAL_TAG="${name}:latest"
-                    REMOTE_TAG="ghcr.io/nbhdai/${name}:latest"
+                    ${tagHandling}
+                    echo "--- Processing image: ${name} (Tag: $TAG) ---"
+                    LOCAL_TAG="${name}:$TAG"
+                    REMOTE_TAG="ghcr.io/nbhdai/${name}:$TAG"
                     RESULT_LINK="result-${name}"
 
                     echo "Building Nix attribute: ${path}..."
@@ -95,13 +107,22 @@
                 containers:
                 let
                   calls = map (c: ''
-                    echo "Triggering upload-${c.name}..."
-                    upload-${c.name}
+                    echo "Triggering upload-${c.name} with tag $TAG..."
+                    upload-${c.name} "$TAG"
                   '') containers;
                 in
                 pkgs.writeShellScriptBin "upload-all-images" ''
                   ${scriptPreamble}
-                  echo "=== 🚀 Starting upload for all images... ==="
+
+                  if [ $# -eq 0 ]; then
+                    echo "Error: No tag provided."
+                    echo "Usage: upload-all-images <semver-tag> (e.g., upload-all-images v0.1.2)"
+                    exit 1
+                  fi
+
+                  TAG=$1
+
+                  echo "=== 🚀 Starting upload for all images with tag: $TAG ==="
                   echo ""
                   ${builtins.concatStringsSep "\n" calls}
                   echo ""
@@ -197,8 +218,8 @@
               fi
               echo "------------------------------------"
               echo "Available commands:"
-              echo "  upload-all-images"
-              ${builtins.concatStringsSep "\n" (map (c: "echo \"  upload-${c.name}\"") myContainers)}
+              echo "  upload-all-images <tag>"
+              ${builtins.concatStringsSep "\n" (map (c: "echo \"  upload-${c.name} <tag>\"") myContainers)}
             '';
           };
         }

@@ -210,9 +210,9 @@ metadata:
 spec:
   hard:
     requests.cpu: "100"
-    requests.memory: "70Gi"
+    requests.memory: "140Gi"
     limits.cpu: "200"
-    limits.memory: "140Gi"
+    limits.memory: "160Gi"
     pods: "100"
     services: "100"
 ---
@@ -264,7 +264,7 @@ data:
   config.yaml: |
     workshops:
       - name: "yolo-l2"
-        image: "ghcr.io/nbhdai/yolo-l2-notebook:latest"
+        image: "ghcr.io/nbhdai/yolo-l2-notebook:v0.1.0"
         description: "YOLO Adversarial Challenge"
         port: 5000
         env:
@@ -272,7 +272,7 @@ data:
           VERIFICATION_SERVER_UNTARGETED: http://yolo-l2-verification:5000/verify
           VERIFICATION_SERVER_TARGETED: http://yolo-l2-target-verification:5000/verify
       - name: "email-indirect"
-        image: "ghcr.io/nbhdai/email-indirect-user:latest"
+        image: "ghcr.io/nbhdai/email-indirect-user:v0.1.0"
         description: "Email Injection Challenge"
         port: 5000
         env:
@@ -281,17 +281,23 @@ data:
           MY_LISTEN_PORT: 25
           WEB_PORT: 5000
       - name: "rag-poisoning"
-        image: "ghcr.io/nbhdai/rag-poisoning-user:latest"
+        image: "ghcr.io/nbhdai/rag-poisoning-user:v0.1.0"
         description: "RAG Poisoning Challenge"
         port: 5000
         env:
           SERVICE_URL: "http://rag-poisoning-service:5000"
       - name: "prompt-extraction"
-        image: "ghcr.io/nbhdai/prompt-extraction-user:latest"
+        image: "ghcr.io/nbhdai/prompt-extraction-user:v0.1.0"
         description: "Prompt Extraction Challenge"
         port: 5000
         env:
           SERVICE_URL: "http://prompt-extraction-service:5000"
+      - name: "llm-embeddings"
+        image: "ghcr.io/nbhdai/llm-embeddings:v0.1.0"
+        description: "LLM Embeddings Explorer"
+        port: 8080
+        env:
+          PORT: "8080"
 
     workshop_namespace: "workshop"
     workshop_ttl_seconds: 3600
@@ -301,19 +307,11 @@ data:
     workshop_pod_limit: 20
     workshop_cpu_request: "1.0"
     workshop_cpu_limit: "2.0"
-    workshop_mem_request: "1Gi"
-    workshop_mem_limit: "2Gi"
-    sidecar_image: "ghcr.io/nbhdai/workshop-sidecar:latest"
+    workshop_mem_request: "4Gi"
+    workshop_mem_limit: "8Gi"
+    sidecar_image: "ghcr.io/nbhdai/workshop-sidecar:v0.1.0"
     garbage_collection_seconds: 300
 ---
-# FOR RSAC
-# - name: "llm-embeddings"
-#         image: "ghcr.io/nbhdai/llm-embeddings:latest"
-#         description: "LLM Embeddings Explorer"
-#         port: 8080
-#         env:
-#           PORT: "8080"
-
 # =============================================================================
 # 5. Hub Deployment & Service
 # =============================================================================
@@ -465,7 +463,7 @@ spec:
     spec:
       containers:
         - name: verification
-          image: ghcr.io/nbhdai/yolo-l2-verification:latest
+          image: ghcr.io/nbhdai/yolo-l2-verification:v0.1.0
           ports:
             - containerPort: 5000
           env:
@@ -513,7 +511,7 @@ spec:
     spec:
       containers:
         - name: service
-          image: ghcr.io/nbhdai/email-indirect-service:latest
+          image: ghcr.io/nbhdai/email-indirect-service:v0.1.0
           ports:
             - containerPort: 2525
           env:
@@ -566,7 +564,7 @@ spec:
       runtimeClassName: nvidia
       containers:
         - name: vllm
-          image: vllm/vllm-openai:latest
+          image: vllm/vllm-openai:v0.18.0-cu130
           command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - "--model"
@@ -675,7 +673,7 @@ spec:
     spec:
       containers:
         - name: service
-          image: ghcr.io/nbhdai/rag-poisoning-service:latest
+          image: ghcr.io/nbhdai/rag-poisoning-service:v0.1.0
           ports:
             - containerPort: 5000
           env:
@@ -724,7 +722,7 @@ spec:
     spec:
       containers:
         - name: service
-          image: ghcr.io/nbhdai/prompt-extraction-service:latest
+          image: ghcr.io/nbhdai/prompt-extraction-service:v0.1.0
           ports:
             - containerPort: 5000
           env:
