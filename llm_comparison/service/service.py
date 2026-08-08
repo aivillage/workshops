@@ -8,8 +8,8 @@ from common import LLMClient
 
 app = Flask(__name__)
 
-# Load models configuration from models.json
-MODELS_CONFIG_PATH = Path(__file__).resolve().parent.parent / "models.json"
+# Load models configuration from models.json in service directory
+MODELS_CONFIG_PATH = Path(__file__).parent / "models.json"
 
 
 def load_models_config():
