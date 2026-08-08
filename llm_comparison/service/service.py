@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from flask import Flask, request, jsonify
-from common import LLMClient
+from common import LLMConfig, LLMClient
 
 app = Flask(__name__)
 
@@ -16,18 +16,7 @@ def load_models_config():
     if MODELS_CONFIG_PATH.exists():
         with open(MODELS_CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    return [
-        {
-            "name": "google/gemma-2-9b-it:free",
-            "display_name": "Gemma 2 9B (Google)",
-            "description": "High-efficiency instruction-tuned model developed by Google DeepMind."
-        },
-        {
-            "name": "meta-llama/llama-3.3-70b-instruct:free",
-            "display_name": "Llama 3.3 70B (Meta)",
-            "description": "State-of-the-art open weights 70B parameter model by Meta for complex reasoning."
-        }
-    ]
+    return []
 
 
 MODELS_LIST = load_models_config()
@@ -35,10 +24,11 @@ MODELS_LIST = load_models_config()
 
 def query_single_model(model_name: str, messages: list, timeout: int = 60) -> dict:
     """Execute OpenAI-compatible LLM call for a specific model in parallel."""
-    client = LLMClient(model=model_name)
+    config = LLMConfig(model=model_name)
+    client = LLMClient(config=config)
     start_time = time.time()
     try:
-        result = client.generate_response(
+        raw_resp = client.chat_completion(
             messages=messages,
             max_tokens=512,
             temperature=0.7,
@@ -46,26 +36,47 @@ def query_single_model(model_name: str, messages: list, timeout: int = 60) -> di
         )
         elapsed_ms = int((time.time() - start_time) * 1000)
 
-        # Estimate token sizes based on word/character count if raw tokens aren't provided by API
-        prompt_text = " ".join([m.get("content", "") for m in messages])
-        prompt_tokens = max(1, len(prompt_text.split()))
-        completion_tokens = max(1, len(result.split()))
+        # Extract message content
+        content = ""
+        if "choices" in raw_resp and len(raw_resp["choices"]) > 0:
+            content = raw_resp["choices"][0].get("message", {}).get("content", "")
 
-        return {
-            "model_name": model_name,
-            "content": result,
-            "latency_ms": elapsed_ms,
-            "tokens": {
+        # Extract token usage metadata from API or estimate if missing
+        usage = raw_resp.get("usage") or {}
+        if usage and "total_tokens" in usage:
+            tokens = {
+                "prompt": usage.get("prompt_tokens", 0),
+                "completion": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0)
+            }
+        else:
+            prompt_text = " ".join([m.get("content", "") for m in messages])
+            prompt_tokens = max(1, len(prompt_text.split()))
+            completion_tokens = max(1, len(content.split()))
+            tokens = {
                 "prompt": prompt_tokens,
                 "completion": completion_tokens,
                 "total": prompt_tokens + completion_tokens
-            },
+            }
+
+        routed_model = raw_resp.get("model", model_name)
+        provider = raw_resp.get("provider", "OpenRouter")
+
+        return {
+            "model_name": model_name,
+            "routed_model": routed_model,
+            "provider": provider,
+            "content": content,
+            "latency_ms": elapsed_ms,
+            "tokens": tokens,
             "status": "success"
         }
     except Exception as e:
         elapsed_ms = int((time.time() - start_time) * 1000)
         return {
             "model_name": model_name,
+            "routed_model": model_name,
+            "provider": "N/A",
             "content": f"Error querying model ({model_name}): {str(e)}",
             "latency_ms": elapsed_ms,
             "tokens": {"prompt": 0, "completion": 0, "total": 0},

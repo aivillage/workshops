@@ -65,7 +65,10 @@ class TestModelComparison(unittest.TestCase):
     def test_query_single_model_success(self, mock_llm_client_cls):
         """Verify query_single_model returns latency, token counts, and content."""
         mock_instance = MagicMock()
-        mock_instance.generate_response.return_value = "Test response content from model A"
+        mock_instance.chat_completion.return_value = {
+            "choices": [{"message": {"content": "Test response content from model A"}}],
+            "usage": {"prompt_tokens": 5, "completion": 10, "total": 15}
+        }
         mock_llm_client_cls.return_value = mock_instance
 
         messages = [{"role": "user", "content": "Hello LLM"}]
