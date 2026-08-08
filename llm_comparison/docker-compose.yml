@@ -17,10 +17,10 @@ services:
           cpus: '0.1'
           memory: 128M
 
-  # Equivalent to: llm-comparison-service (Deployment/Service)
   llm-comparison-service:
     build:
-      context: ./service
+      context: ..
+      dockerfile: llm_comparison/service/Dockerfile
     image: workshop-llm-comparison-service:local
     environment:
       - VLLM_URL=${VLLM_URL:-http://llm-services.local/v1/chat/completions}
