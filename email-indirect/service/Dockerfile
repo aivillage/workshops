@@ -5,6 +5,7 @@ RUN pip install aiosmtpd requests
 
 # Create a non-root user for security (optional, but good practice)
 WORKDIR /app
+COPY common ./common
 COPY service.py .
 
 # Expose the port we defined in the script

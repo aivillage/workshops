@@ -214,5 +214,6 @@ def chat():
         return jsonify({"response": f"Service error: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    print("[*] Prompt Extraction UI starting")
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[*] Prompt Extraction UI starting on port {port}")
+    app.run(host='0.0.0.0', port=port)

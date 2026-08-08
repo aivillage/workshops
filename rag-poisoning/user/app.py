@@ -328,5 +328,6 @@ def chat_route():
         return jsonify({"response": f"Service error: {str(e)}", "sources": [], "won": False}), 500
 
 if __name__ == '__main__':
-    print("[*] RAG Poisoning UI starting")
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[*] RAG Poisoning UI starting on port {port}")
+    app.run(host='0.0.0.0', port=port)

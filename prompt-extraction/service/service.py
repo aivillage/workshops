@@ -1,12 +1,9 @@
 import os
-import json
-import requests
 from flask import Flask, request, jsonify
+from common import LLMClient
 
 app = Flask(__name__)
-
-VLLM_URL = os.environ.get("VLLM_URL", "http://llm-services.local/v1/chat/completions")
-VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
+llm_client = LLMClient()
 
 SECRET_FLAG = os.environ.get("SECRET_FLAG", "flag{sYsT3m_Pr0mPt_ExF1lTr4t3d}")
 
@@ -32,26 +29,14 @@ def chat():
         messages.append({"role": role, "content": entry['content']})
     messages.append({"role": "user", "content": user_message})
 
-    payload = {
-        "model": VLLM_MODEL,
-        "messages": messages,
-        "max_tokens": 512,
-        "temperature": 1.0,
-    }
-
     try:
-        resp = requests.post(VLLM_URL, json=payload, timeout=60)
-        resp_json = resp.json()
-
-        if 'choices' in resp_json and len(resp_json['choices']) > 0:
-            content = resp_json['choices'][0].get('message', {}).get('content', '')
-            won = SECRET_FLAG in content
-            return jsonify({
-                "response": content,
-                "won": won,
-                "flag": SECRET_FLAG if won else None,
-            })
-        return jsonify({"response": "I'm having trouble responding right now.", "won": False})
+        content = llm_client.generate_response(messages, max_tokens=512, temperature=1.0, timeout=60)
+        won = SECRET_FLAG in content
+        return jsonify({
+            "response": content,
+            "won": won,
+            "flag": SECRET_FLAG if won else None,
+        })
     except Exception as e:
         return jsonify({"response": f"Error: {str(e)}", "won": False}), 500
 
@@ -60,5 +45,6 @@ def health():
     return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
-    print(f"[*] Prompt Extraction Service starting")
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[*] Prompt Extraction Service starting on port {port}")
+    app.run(host='0.0.0.0', port=port)
