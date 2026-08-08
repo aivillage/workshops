@@ -48,19 +48,19 @@ class LLMConfig:
         api_key: Optional[str] = None,
         secrets_file: Optional[Path] = None,
     ):
-        secrets = load_secrets_env(secrets_file)
+        file_config = load_secrets_env(secrets_file)
 
         # Precedence: Explicit Arg > Env Var > secrets.env > Default
         self.url = (
             url
             or os.environ.get("VLLM_URL")
-            or secrets.get("VLLM_URL")
+            or file_config.get("VLLM_URL")
             or "http://llm-services.local/v1/chat/completions"
         )
         self.model = (
             model
             or os.environ.get("VLLM_MODEL")
-            or secrets.get("VLLM_MODEL")
+            or file_config.get("VLLM_MODEL")
             or "vllm-model"
         )
 
@@ -68,8 +68,8 @@ class LLMConfig:
             api_key
             or os.environ.get("VLLM_API_KEY")
             or os.environ.get("OPENROUTER_API_KEY")
-            or secrets.get("VLLM_API_KEY")
-            or secrets.get("OPENROUTER_API_KEY")
+            or file_config.get("VLLM_API_KEY")
+            or file_config.get("OPENROUTER_API_KEY")
             or ""
         )
         self.api_key = raw_key.strip().strip('"').strip("'")
