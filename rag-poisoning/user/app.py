@@ -325,7 +325,8 @@ def chat_route():
         )
         return jsonify(resp.json())
     except Exception as e:
-        return jsonify({"response": f"Service error: {str(e)}", "sources": [], "won": False}), 500
+        print(f"[!] Service error: {e}")
+        return jsonify({"response": "Service error: Unable to connect to challenge service.", "sources": [], "won": False}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
