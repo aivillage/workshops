@@ -42,6 +42,7 @@ We'll add a per-user API key for management and budget if users end up abusing t
 | **Indirect Email Injection** | [`email-indirect/`](./email-indirect) | Indirect prompt injection & LLM function-calling calendar exploit | LLM Endpoint / OpenRouter / Ollama |
 | **System Prompt Extraction** | [`prompt-extraction/`](./prompt-extraction) | System prompt exfiltration targeting OmniCorp authorization code | LLM Endpoint / OpenRouter / Ollama |
 | **RAG Poisoning** | [`rag-poisoning/`](./rag-poisoning) | Knowledge base injection to manipulate RAG vendor recommendations | LLM Endpoint / OpenRouter / Ollama |
+| **Parallel LLM Exploration** | [`llm_comparison/`](./llm_comparison) | Side-by-side multi-turn comparison & context branching across two LLMs | LLM Endpoint / OpenRouter / Ollama |
 | **YOLO Adversarial Attack** | [`yolo-l2/`](./yolo-l2) | $L_2$-bounded image perturbation attack against YOLOv11 classification | Offline (PyTorch included) |
 | **LLM Embeddings Explorer** | [`llm-embeddings/`](./llm-embeddings) | Live visualization of hidden states, token logits, and FFT spectral density | Offline (`gemma-270m` included) |
 
