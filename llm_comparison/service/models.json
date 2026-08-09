@@ -1,28 +1,18 @@
 [
   {
-    "name": "google/gemma-2-9b-it:free",
-    "display_name": "Gemma 2 9B (Google)",
-    "description": "High-efficiency instruction-tuned model developed by Google DeepMind."
+    "name": "openrouter/free",
+    "display_name": "OpenRouter Free Auto-Router",
+    "description": "Automatically routes your request to the fastest available free model on OpenRouter."
   },
   {
-    "name": "meta-llama/llama-3.3-70b-instruct:free",
-    "display_name": "Llama 3.3 70B (Meta)",
-    "description": "State-of-the-art open weights 70B parameter model by Meta for complex reasoning."
+    "name": "google/gemma-4-31b-it:free",
+    "display_name": "Gemma 4 31B (Google)",
+    "description": "High-efficiency 31B parameter instruction-tuned model by Google DeepMind."
   },
   {
-    "name": "deepseek/deepseek-r1:free",
-    "display_name": "DeepSeek R1 (Reasoning)",
-    "description": "Open-weights reasoning model specializing in math, code, and step-by-step logic."
-  },
-  {
-    "name": "qwen/qwen-2.5-coder-32b-instruct:free",
-    "display_name": "Qwen 2.5 Coder 32B (Alibaba)",
-    "description": "Specialized code generation and software development assistant by Alibaba."
-  },
-  {
-    "name": "mistralai/mistral-7b-instruct:free",
-    "display_name": "Mistral 7B (Mistral AI)",
-    "description": "Fast and lightweight open model optimized for general instructions and chat."
+    "name": "google/gemma-4-26b-a4b-it:free",
+    "display_name": "Gemma 4 26B (Google)",
+    "description": "26B parameter multimodal model by Google DeepMind."
   },
   {
     "name": "nvidia/nemotron-nano-9b-v2:free",
@@ -33,5 +23,15 @@
     "name": "inclusionai/ling-3.0-tiny:free",
     "display_name": "Ling 3.0 Tiny (Ant Group)",
     "description": "Ultra-lightweight conversational assistant developed by Ant Group."
+  },
+  {
+    "name": "cohere/north-mini-code:free",
+    "display_name": "North Mini Code (Cohere)",
+    "description": "Code generation and instruction model by Cohere."
+  },
+  {
+    "name": "openai/gpt-oss-20b:free",
+    "display_name": "GPT OSS 20B",
+    "description": "Open source weights 20B model."
   }
 ]
