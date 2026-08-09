@@ -17,16 +17,13 @@ class TestPackagingSanity(unittest.TestCase):
         ModuleNotFoundError inside containers.
         """
         services = ["email-indirect", "prompt-extraction", "rag-poisoning"]
+        root_common = repo_root / "common"
+        self.assertTrue(root_common.exists(), f"Missing root common package in {root_common}")
+        self.assertTrue((root_common / "llm_client.py").exists(), "Missing llm_client.py in root common package")
+
         for svc in services:
             svc_dir = repo_root / svc / "service"
-            common_dir = svc_dir / "common"
             dockerfile = svc_dir / "Dockerfile"
-
-            # 1. Check common package directory exists in each service folder
-            self.assertTrue(common_dir.exists(), f"Missing common package in {common_dir}")
-            self.assertTrue((common_dir / "llm_client.py").exists(), f"Missing llm_client.py in {common_dir}")
-
-            # 2. Check Dockerfile includes 'COPY common ./common'
             self.assertTrue(dockerfile.exists(), f"Missing Dockerfile in {svc_dir}")
             dockerfile_content = dockerfile.read_text(encoding="utf-8")
             self.assertIn(

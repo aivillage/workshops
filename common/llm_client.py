@@ -61,7 +61,7 @@ class LLMConfig:
             model
             or os.environ.get("VLLM_MODEL")
             or file_config.get("VLLM_MODEL")
-            or "vllm-model"
+            or "openrouter/free"
         )
 
         raw_key = (

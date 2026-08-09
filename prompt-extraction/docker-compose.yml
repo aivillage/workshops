@@ -17,10 +17,10 @@ services:
           cpus: '0.1'
           memory: 128M
 
-  # Equivalent to: prompt-extraction-service (Deployment/Service)
   prompt-extraction-service:
     build:
-      context: ./service
+      context: ..
+      dockerfile: prompt-extraction/service/Dockerfile
     image: workshop-prompt-extraction-service:local
     environment:
       - VLLM_URL=${VLLM_URL:-http://llm-services.local/v1/chat/completions}
