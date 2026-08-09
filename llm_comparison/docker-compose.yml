@@ -1,13 +1,13 @@
 services:
-  # Equivalent to: prompt-extraction-user (Pod/Service)
-  prompt-extraction-user:
+  # Equivalent to: llm-comparison-user (Pod/Service)
+  llm-comparison-user:
     build:
-      context: ./user
-    image: workshop-prompt-extraction-user:local
+      context: .
+    image: workshop-llm-comparison-user:local
     ports:
-      - "30060:5000"
+      - "30080:5000"
     environment:
-      - SERVICE_URL=http://prompt-extraction-service:5000
+      - SERVICE_URL=http://llm-comparison-service:5000
     deploy:
       resources:
         limits:
@@ -17,11 +17,11 @@ services:
           cpus: '0.1'
           memory: 128M
 
-  prompt-extraction-service:
+  llm-comparison-service:
     build:
       context: ..
-      dockerfile: prompt-extraction/service/Dockerfile
-    image: workshop-prompt-extraction-service:local
+      dockerfile: llm_comparison/service/Dockerfile
+    image: workshop-llm-comparison-service:local
     environment:
       - VLLM_URL=${VLLM_URL:-http://llm-services.local/v1/chat/completions}
       - VLLM_MODEL=${VLLM_MODEL:-vllm-model}

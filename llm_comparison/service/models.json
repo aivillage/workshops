@@ -1,0 +1,37 @@
+[
+  {
+    "name": "openrouter/free",
+    "display_name": "OpenRouter Free Auto-Router",
+    "description": "Automatically routes your request to the fastest available free model on OpenRouter."
+  },
+  {
+    "name": "google/gemma-4-31b-it:free",
+    "display_name": "Gemma 4 31B (Google)",
+    "description": "High-efficiency 31B parameter instruction-tuned model by Google DeepMind."
+  },
+  {
+    "name": "google/gemma-4-26b-a4b-it:free",
+    "display_name": "Gemma 4 26B (Google)",
+    "description": "26B parameter multimodal model by Google DeepMind."
+  },
+  {
+    "name": "nvidia/nemotron-nano-9b-v2:free",
+    "display_name": "Nemotron Nano 9B (Nvidia)",
+    "description": "Compact synthetic-data optimized model tuned by Nvidia for speed and safety."
+  },
+  {
+    "name": "inclusionai/ling-3.0-tiny:free",
+    "display_name": "Ling 3.0 Tiny (Ant Group)",
+    "description": "Ultra-lightweight conversational assistant developed by Ant Group."
+  },
+  {
+    "name": "cohere/north-mini-code:free",
+    "display_name": "North Mini Code (Cohere)",
+    "description": "Code generation and instruction model by Cohere."
+  },
+  {
+    "name": "openai/gpt-oss-20b:free",
+    "display_name": "GPT OSS 20B",
+    "description": "Open source weights 20B model."
+  }
+]
