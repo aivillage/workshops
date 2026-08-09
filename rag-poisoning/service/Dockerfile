@@ -4,7 +4,7 @@ RUN pip install flask requests
 
 WORKDIR /app
 COPY common ./common
-COPY service.py .
+COPY rag-poisoning/service/service.py ./service.py
 
 EXPOSE 5000
 

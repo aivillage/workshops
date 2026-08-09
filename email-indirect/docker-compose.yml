@@ -21,10 +21,10 @@ services:
           cpus: '0.5'
           memory: 512M
 
-  # Equivalent to: email-service (Deployment/Service)
   email-service:
     build:
-      context: ./service
+      context: ..
+      dockerfile: email-indirect/service/Dockerfile
     image: workshop-email-indirect-service:local
     environment:
       - LISTEN_PORT=2525

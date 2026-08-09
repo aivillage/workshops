@@ -39,8 +39,15 @@ class TestModelComparison(unittest.TestCase):
         mock_resp_400.status_code = 400
         mock_resp_400.get_json.return_value = {"error": "Prompt cannot be empty"}
 
+        mock_resp_200_single = MagicMock()
+        mock_resp_200_single.status_code = 200
+        mock_resp_200_single.get_json.return_value = {
+            "model_name": "openrouter/free",
+            "content": "Single model response"
+        }
+
         mock_client = MagicMock()
-        mock_client.post.side_effect = lambda path, json=None: mock_resp_400 if not (json or {}).get("prompt", "").strip() else mock_resp_200
+        mock_client.post.side_effect = lambda path, json=None: mock_resp_400 if (path == '/compare' and not (json or {}).get("prompt", "").strip()) else (mock_resp_200_single if 'compare_single' in path else mock_resp_200)
 
         tc = comparison_service.app.test_client()
         if isinstance(tc, MagicMock) or type(tc).__name__ == 'MagicMock':
@@ -130,8 +137,8 @@ class TestModelComparison(unittest.TestCase):
         mock_requests_post.return_value = mock_resp
 
         payload = {
-            "model_a": "google/gemma-2-9b-it:free",
-            "model_b": "meta-llama/llama-3.3-70b-instruct:free",
+            "model_a": "openrouter/free",
+            "model_b": "google/gemma-4-31b-it:free",
             "prompt": "Test prompt"
         }
 
@@ -140,6 +147,24 @@ class TestModelComparison(unittest.TestCase):
         data = response.get_json()
         self.assertIn("model_a", data)
         self.assertIn("model_b", data)
+
+    @patch("llm_comparison.service.service.query_single_model")
+    def test_compare_single_endpoint(self, mock_query):
+        """Verify /compare_single endpoint executes a single model retry."""
+        mock_query.return_value = {
+            "model_name": "openrouter/free",
+            "content": "Single model response",
+            "status": "success"
+        }
+
+        response = self.service_client.post('/compare_single', json={
+            "model_name": "openrouter/free",
+            "messages": [{"role": "user", "content": "Hello"}]
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["model_name"], "openrouter/free")
+        self.assertEqual(data["content"], "Single model response")
 
 
 if __name__ == "__main__":

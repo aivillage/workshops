@@ -43,7 +43,7 @@ class TestLLMConfig(unittest.TestCase):
         with patch("common.llm_client.load_secrets_env", return_value={}):
             cfg = LLMConfig()
             self.assertEqual(cfg.url, "http://llm-services.local/v1/chat/completions")
-            self.assertEqual(cfg.model, "vllm-model")
+            self.assertEqual(cfg.model, "openrouter/free")
             self.assertEqual(cfg.api_key, "")
             self.assertEqual(cfg.get_headers(), {"Content-Type": "application/json"})
 

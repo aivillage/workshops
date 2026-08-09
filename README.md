@@ -55,7 +55,7 @@ To test with external LLM APIs (like OpenRouter or Google AI Studio) without com
 ```env
 OPENROUTER_API_KEY=sk-or-v1-your-actual-api-key-without-quotes
 VLLM_URL=https://openrouter.ai/api/v1/chat/completions
-VLLM_MODEL=google/gemma-2-9b-it:free
+VLLM_MODEL=openrouter/free
 ```
 
 ### Supported API Providers:

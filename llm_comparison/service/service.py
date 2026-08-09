@@ -62,6 +62,18 @@ def query_single_model(model_name: str, messages: list, timeout: int = 60) -> di
         routed_model = raw_resp.get("model", model_name)
         provider = raw_resp.get("provider", "OpenRouter")
 
+        if not content and "error" in raw_resp:
+            err_msg = raw_resp["error"].get("message", "API Error")
+            return {
+                "model_name": model_name,
+                "routed_model": model_name,
+                "provider": provider,
+                "content": f"Error: {err_msg}",
+                "latency_ms": elapsed_ms,
+                "tokens": {"prompt": 0, "completion": 0, "total": 0},
+                "status": "error"
+            }
+
         return {
             "model_name": model_name,
             "routed_model": routed_model,
@@ -87,8 +99,8 @@ def query_single_model(model_name: str, messages: list, timeout: int = 60) -> di
 @app.route('/compare', methods=['POST'])
 def compare():
     data = request.get_json() or {}
-    model_a = data.get("model_a", "google/gemma-2-9b-it:free")
-    model_b = data.get("model_b", "meta-llama/llama-3.3-70b-instruct:free")
+    model_a = data.get("model_a", "openrouter/free")
+    model_b = data.get("model_b", "google/gemma-4-31b-it:free")
     history = data.get("history", [])
     prompt = data.get("prompt", "")
     system_prompt = data.get("system_prompt", "")
@@ -120,6 +132,16 @@ def compare():
         "model_b": res_b,
         "prompt": prompt.strip()
     })
+
+
+@app.route('/compare_single', methods=['POST'])
+def compare_single():
+    data = request.get_json() or {}
+    model_name = data.get("model_name", "openrouter/free")
+    messages = data.get("messages", [])
+
+    res = query_single_model(model_name, messages)
+    return jsonify(res)
 
 
 @app.route('/models', methods=['GET'])

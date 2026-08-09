@@ -17,10 +17,10 @@ services:
           cpus: '0.1'
           memory: 128M
 
-  # Equivalent to: rag-poisoning-service (Deployment/Service)
   rag-poisoning-service:
     build:
-      context: ./service
+      context: ..
+      dockerfile: rag-poisoning/service/Dockerfile
     image: workshop-rag-poisoning-service:local
     environment:
       - VLLM_URL=${VLLM_URL:-http://llm-services.local/v1/chat/completions}
