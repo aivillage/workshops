@@ -8,11 +8,13 @@ import os
 from email import message_from_bytes
 from email.message import EmailMessage
 from aiosmtpd.controller import Controller
+from common import LLMClient
 
 # --- CONFIGURATION ---
 LISTEN_HOST = os.environ.get("LISTEN_HOST", '0.0.0.0')
 LISTEN_PORT = os.environ.get("LISTEN_PORT", 2525)
 REPLY_SENDER = os.environ.get("REPLY_SENDER", 'agent@ctf.local')
+REPLY_PORT = int(os.environ.get("REPLY_PORT", 25))
 CALENDAR_SERVICE_URL = os.environ.get("CALENDAR_SERVICE_URL", "http://ctf-calendar-service")
 
 VLLM_URL = os.environ.get("VLLM_URL", "http://llm-services.local/v1/chat/completions")
@@ -165,70 +167,28 @@ TOOLS_SCHEMA = [
     }
 ]
 
-class LLMClient:
-    def generate(self, prompt, context_history=[]):
-        """
-        Generic wrapper to switch between Ollama/Gemini/Claude/vLLM easily.
-        """
-        return self._call_vllm(prompt, context_history)
+class EmailLLMClient:
+    def __init__(self):
+        self.client = LLMClient()
 
-    def _call_vllm(self, prompt, context_history):
-        # Construct messages for Chat API
+    def generate(self, prompt, context_history=[]):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for entry in context_history:
-            # Map AgentRuntime roles to standard Chat roles
             role = entry['role'].lower()
             if role not in ['user', 'assistant', 'system']:
-                role = 'user' # Fallback
+                role = 'user'
             messages.append({"role": role, "content": entry['content']})
-        
+
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
-            "model": VLLM_MODEL,
-            "messages": messages,
-            "tools": TOOLS_SCHEMA,
-            "tool_choice": "auto"
-        }
-        
         try:
-            resp = requests.post(VLLM_URL, json=payload, timeout=30)
-            
-            # Fallback if vLLM returns 400 (common with tool-calling incompatibility)
-            if resp.status_code == 400 and "tools" in payload:
-                print("[!] vLLM returned 400 with tools. Retrying without tools...")
-                payload.pop("tools", None)
-                payload.pop("tool_choice", None)
-                resp = requests.post(VLLM_URL, json=payload, timeout=30)
-
-            resp.raise_for_status()
-            resp_json = resp.json()
-            
-            # Check for tool calls
-            if 'choices' in resp_json and len(resp_json['choices']) > 0:
-                choice = resp_json['choices'][0]
-                message = choice.get('message', {})
-                
-                # Handle Native Tool Calls by converting to AgentRuntime's expected JSON format
-                if 'tool_calls' in message and message['tool_calls']:
-                    tool_call = message['tool_calls'][0]
-                    func_name = tool_call['function']['name']
-                    try:
-                        func_args = json.loads(tool_call['function']['arguments'])
-                    except json.JSONDecodeError:
-                        func_args = {}
-                    
-                    # Return the JSON string that AgentRuntime expects
-                    return json.dumps({"tool": func_name, "args": func_args})
-                
-                return message.get('content', '')
-            return ""
+            return self.client.generate_response(messages, tools=TOOLS_SCHEMA, tool_choice="auto", timeout=30)
         except Exception as e:
             return f"LLM Error: {str(e)}"
 
 class AgentRuntime:
     def __init__(self):
-        self.llm = LLMClient()
+        self.llm = EmailLLMClient()
 
     def process_email(self, user_body):
         history = []
@@ -323,7 +283,7 @@ class EmailHandler:
         msg['To'] = target_email
 
         try:
-            with smtplib.SMTP(target_ip, 25) as smtp:
+            with smtplib.SMTP(target_ip, REPLY_PORT) as smtp:
                 smtp.send_message(msg)
                 print(f"[+] Reply sent to {target_email}")
         except Exception as e:

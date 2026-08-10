@@ -3,3 +3,7 @@
 .direnv
 .direnv/*
 .talos
+__pycache__/
+*.pyc
+.env.local
+

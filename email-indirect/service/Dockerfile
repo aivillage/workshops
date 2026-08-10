@@ -5,7 +5,8 @@ RUN pip install aiosmtpd requests
 
 # Create a non-root user for security (optional, but good practice)
 WORKDIR /app
-COPY service.py .
+COPY common ./common
+COPY email-indirect/service/service.py ./service.py
 
 # Expose the port we defined in the script
 EXPOSE 2525
