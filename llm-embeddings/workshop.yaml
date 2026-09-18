@@ -2,7 +2,7 @@ name: llm-embeddings
 description: "LLM Embeddings Explorer"
 model: "google/gemma-3-270m"
 user:
-  image: "ghcr.io/nbhdai/llm-embeddings:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/llm-embeddings:v0.1.0"
   port: 8080
   env:
     PORT: "8080"

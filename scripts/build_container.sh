@@ -45,18 +45,28 @@ if [[ -z "$TAG" ]]; then
   fi
 fi
 
+if command -v podman &>/dev/null; then
+  CONTAINER_CMD="podman"
+elif [[ -x "/opt/homebrew/bin/podman" ]]; then
+  CONTAINER_CMD="/opt/homebrew/bin/podman"
+elif command -v docker &>/dev/null; then
+  CONTAINER_CMD="docker"
+else
+  CONTAINER_CMD="docker"
+fi
+
 build_one() {
   local name="$1"
   local path="$2"
-  local image="ghcr.io/aivillage/${name}"
+  local image="ghcr.io/aivillage/workshops/${name}"
   local full_tag="${image}:${TAG}"
 
   echo "=== 🔨 Building ${name} (Tag: ${TAG}) ==="
-  docker build --platform linux/amd64 -t "${full_tag}" "${PROJECT_ROOT}/${path}"
+  "$CONTAINER_CMD" build --platform linux/amd64 -t "${full_tag}" "${PROJECT_ROOT}/${path}"
 
   if [[ "$PUSH" == "true" ]]; then
     echo "=== 🚀 Pushing ${full_tag} ==="
-    docker push "${full_tag}"
+    "$CONTAINER_CMD" push "${full_tag}"
 
     local current_branch
     current_branch="${GITHUB_REF_NAME:-$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")}"
@@ -64,8 +74,8 @@ build_one() {
       local latest_tag="${image}:latest"
       if [[ "${full_tag}" != "${latest_tag}" ]]; then
         echo "=== Tagging and pushing ${latest_tag} ==="
-        docker tag "${full_tag}" "${latest_tag}"
-        docker push "${latest_tag}"
+        "$CONTAINER_CMD" tag "${full_tag}" "${latest_tag}"
+        "$CONTAINER_CMD" push "${latest_tag}"
       fi
     fi
   fi

@@ -2,10 +2,10 @@ name: prompt-extraction
 description: "Prompt Extraction Challenge"
 model: "google/gemma-4-31B-it-qat-w4a16-ct"
 user:
-  image: "ghcr.io/nbhdai/prompt-extraction-user:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/prompt-extraction-user:v0.1.0"
   port: 5000
   env:
     SERVICE_URL: "http://prompt-extraction-service:5000"
 service:
-  image: "ghcr.io/nbhdai/prompt-extraction-service:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/prompt-extraction-service:v0.1.0"
   port: 5000
