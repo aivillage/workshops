@@ -1,0 +1,14 @@
+name: yolo-l2
+description: "YOLO Adversarial Challenge"
+user:
+  image: "ghcr.io/nbhdai/yolo-l2-notebook:v0.1.0"
+  port: 5000
+  env:
+    BASE_URL: "/workshop/yolo-l2"
+    VERIFICATION_SERVER_UNTARGETED: "http://yolo-l2-verification:5000/verify"
+    VERIFICATION_SERVER_TARGETED: "http://yolo-l2-target-verification:5000/verify"
+service:
+  image: "ghcr.io/nbhdai/yolo-l2-verification:v0.1.0"
+  port: 5000
+  env:
+    L2_THRESHOLD: "50.0"

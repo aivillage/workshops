@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 VLLM_URL = os.environ.get("VLLM_URL", "http://llm-services.local/v1/chat/completions")
-VLLM_MODEL = os.environ.get("VLLM_MODEL", "vllm-model")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "gemma-3")
 
 SECRET_FLAG = os.environ.get("SECRET_FLAG", "flag{sYsT3m_Pr0mPt_ExF1lTr4t3d}")
 

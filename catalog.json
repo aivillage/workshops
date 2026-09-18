@@ -1,0 +1,142 @@
+{
+  "workshops": {
+    "email-indirect": {
+      "name": "email-indirect",
+      "description": "Email Injection Challenge",
+      "model": "google/gemma-4-31B-it-qat-w4a16-ct",
+      "user": {
+        "image": "ghcr.io/nbhdai/email-indirect-user:v0.1.0",
+        "port": 5000,
+        "env": {
+          "CHALLENGE_SERVER_HOST": "email-indirect-service",
+          "CHALLENGE_SERVER_PORT": 2525,
+          "MY_LISTEN_PORT": 25,
+          "WEB_PORT": 5000
+        }
+      },
+      "service": {
+        "image": "ghcr.io/nbhdai/email-indirect-service:v0.1.0",
+        "port": 2525
+      }
+    },
+    "llm-embeddings": {
+      "name": "llm-embeddings",
+      "description": "LLM Embeddings Explorer",
+      "model": "google/gemma-3-270m",
+      "user": {
+        "image": "ghcr.io/nbhdai/llm-embeddings:v0.1.0",
+        "port": 8080,
+        "env": {
+          "PORT": "8080"
+        }
+      }
+    },
+    "prompt-extraction": {
+      "name": "prompt-extraction",
+      "description": "Prompt Extraction Challenge",
+      "model": "google/gemma-4-31B-it-qat-w4a16-ct",
+      "user": {
+        "image": "ghcr.io/nbhdai/prompt-extraction-user:v0.1.0",
+        "port": 5000,
+        "env": {
+          "SERVICE_URL": "http://prompt-extraction-service:5000"
+        }
+      },
+      "service": {
+        "image": "ghcr.io/nbhdai/prompt-extraction-service:v0.1.0",
+        "port": 5000
+      }
+    },
+    "rag-poisoning": {
+      "name": "rag-poisoning",
+      "description": "RAG Poisoning Challenge",
+      "model": "google/gemma-4-31B-it-qat-w4a16-ct",
+      "user": {
+        "image": "ghcr.io/nbhdai/rag-poisoning-user:v0.1.0",
+        "port": 5000,
+        "env": {
+          "SERVICE_URL": "http://rag-poisoning-service:5000"
+        }
+      },
+      "service": {
+        "image": "ghcr.io/nbhdai/rag-poisoning-service:v0.1.0",
+        "port": 5000
+      }
+    },
+    "yolo-l2": {
+      "name": "yolo-l2",
+      "description": "YOLO Adversarial Challenge",
+      "user": {
+        "image": "ghcr.io/nbhdai/yolo-l2-notebook:v0.1.0",
+        "port": 5000,
+        "env": {
+          "BASE_URL": "/workshop/yolo-l2",
+          "VERIFICATION_SERVER_UNTARGETED": "http://yolo-l2-verification:5000/verify",
+          "VERIFICATION_SERVER_TARGETED": "http://yolo-l2-target-verification:5000/verify"
+        }
+      },
+      "service": {
+        "image": "ghcr.io/nbhdai/yolo-l2-verification:v0.1.0",
+        "port": 5000,
+        "env": {
+          "L2_THRESHOLD": "50.0"
+        }
+      }
+    }
+  },
+  "workshopInfo": {
+    "requiredModels": [
+      "google/gemma-3-270m",
+      "google/gemma-4-31B-it-qat-w4a16-ct"
+    ],
+    "requiredImages": [
+      "ghcr.io/nbhdai/email-indirect-service:v0.1.0",
+      "ghcr.io/nbhdai/email-indirect-user:v0.1.0",
+      "ghcr.io/nbhdai/llm-embeddings:v0.1.0",
+      "ghcr.io/nbhdai/prompt-extraction-service:v0.1.0",
+      "ghcr.io/nbhdai/prompt-extraction-user:v0.1.0",
+      "ghcr.io/nbhdai/rag-poisoning-service:v0.1.0",
+      "ghcr.io/nbhdai/rag-poisoning-user:v0.1.0",
+      "ghcr.io/nbhdai/yolo-l2-notebook:v0.1.0",
+      "ghcr.io/nbhdai/yolo-l2-verification:v0.1.0"
+    ]
+  },
+  "containers": [
+    {
+      "name": "email-indirect-service",
+      "path": "email-indirect/service"
+    },
+    {
+      "name": "email-indirect-user",
+      "path": "email-indirect/user"
+    },
+    {
+      "name": "llm-embeddings",
+      "path": "llm-embeddings"
+    },
+    {
+      "name": "prompt-extraction-service",
+      "path": "prompt-extraction/service"
+    },
+    {
+      "name": "prompt-extraction-user",
+      "path": "prompt-extraction/user"
+    },
+    {
+      "name": "rag-poisoning-service",
+      "path": "rag-poisoning/service"
+    },
+    {
+      "name": "rag-poisoning-user",
+      "path": "rag-poisoning/user"
+    },
+    {
+      "name": "yolo-l2-notebook",
+      "path": "yolo-l2/notebook"
+    },
+    {
+      "name": "yolo-l2-verification",
+      "path": "yolo-l2/verification"
+    }
+  ]
+}

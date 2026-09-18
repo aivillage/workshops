@@ -1,0 +1,14 @@
+name: email-indirect
+description: "Email Injection Challenge"
+model: "google/gemma-4-31B-it-qat-w4a16-ct"
+user:
+  image: "ghcr.io/nbhdai/email-indirect-user:v0.1.0"
+  port: 5000
+  env:
+    CHALLENGE_SERVER_HOST: "email-indirect-service"
+    CHALLENGE_SERVER_PORT: 2525
+    MY_LISTEN_PORT: 25
+    WEB_PORT: 5000
+service:
+  image: "ghcr.io/nbhdai/email-indirect-service:v0.1.0"
+  port: 2525
