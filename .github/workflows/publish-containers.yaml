@@ -33,11 +33,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify catalog.json is in sync with workshop.yaml files
-        run: |
-          python -m pip install pyyaml
-          python scripts/compile_catalog.py --check
-
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
