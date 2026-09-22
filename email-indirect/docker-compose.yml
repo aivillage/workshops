@@ -2,7 +2,7 @@ services:
   # Equivalent to: email-client-dev (Pod/Service)
   email-client-dev:
     build:
-      context: ./service
+      context: ./user
     image: workshop-email-indirect-user:local
     ports:
       - "30050:5000"  # Web UI access
