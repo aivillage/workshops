@@ -2,11 +2,14 @@
   "workshops": {
     "email-indirect": {
       "name": "email-indirect",
-      "description": "Email Injection Challenge",
+      "description": "OmniCorp deployed an automated executive email assistant. Probe the agent and exfiltrate confidential corporate data.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/email-indirect-user:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/email-indirect-user:667af5d",
         "port": 5000,
+        "extraIngressPorts": [
+          25
+        ],
         "env": {
           "CHALLENGE_SERVER_HOST": "email-indirect-service",
           "CHALLENGE_SERVER_PORT": 2525,
@@ -15,16 +18,20 @@
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/email-indirect-service:v0.1.0",
-        "port": 2525
+        "image": "ghcr.io/aivillage/workshops/email-indirect-service:667af5d",
+        "port": 2525,
+        "env": {
+          "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
+          "VLLM_MODEL": "gemma-3"
+        }
       }
     },
     "llm-embeddings": {
       "name": "llm-embeddings",
-      "description": "LLM Embeddings Explorer",
+      "description": "Interactive visualizer exploring tokenization, embedding spaces, and agent execution loops.",
       "model": "google/gemma-3-270m",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/llm-embeddings:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/llm-embeddings:667af5d",
         "port": 8080,
         "env": {
           "PORT": "8080"
@@ -33,50 +40,58 @@
     },
     "prompt-extraction": {
       "name": "prompt-extraction",
-      "description": "Prompt Extraction Challenge",
+      "description": "OmniCorp's internal AI helpdesk holds restricted credentials. Bypass its guardrails to extract the secret code.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/prompt-extraction-user:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/prompt-extraction-user:667af5d",
         "port": 5000,
         "env": {
           "SERVICE_URL": "http://prompt-extraction-service:5000"
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/prompt-extraction-service:v0.1.0",
-        "port": 5000
+        "image": "ghcr.io/aivillage/workshops/prompt-extraction-service:667af5d",
+        "port": 5000,
+        "env": {
+          "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
+          "VLLM_MODEL": "gemma-3"
+        }
       }
     },
     "rag-poisoning": {
       "name": "rag-poisoning",
-      "description": "RAG Poisoning Challenge",
+      "description": "Subvert an enterprise policy advisor by poisoning its retrieval-augmented knowledge base.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/rag-poisoning-user:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/rag-poisoning-user:667af5d",
         "port": 5000,
         "env": {
           "SERVICE_URL": "http://rag-poisoning-service:5000"
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/rag-poisoning-service:v0.1.0",
-        "port": 5000
+        "image": "ghcr.io/aivillage/workshops/rag-poisoning-service:667af5d",
+        "port": 5000,
+        "env": {
+          "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
+          "VLLM_MODEL": "gemma-3"
+        }
       }
     },
     "yolo-l2": {
       "name": "yolo-l2",
-      "description": "YOLO Adversarial Challenge",
+      "description": "Fool a real-time object detection model using imperceptible image perturbations.",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/yolo-l2-notebook:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/yolo-l2-notebook:667af5d",
         "port": 5000,
         "env": {
-          "BASE_URL": "/workshop/yolo-l2",
+          "BASE_URL": "/",
           "VERIFICATION_SERVER_UNTARGETED": "http://yolo-l2-verification:5000/verify",
           "VERIFICATION_SERVER_TARGETED": "http://yolo-l2-target-verification:5000/verify"
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/yolo-l2-verification:v0.1.0",
+        "image": "ghcr.io/aivillage/workshops/yolo-l2-verification:667af5d",
         "port": 5000,
         "env": {
           "L2_THRESHOLD": "50.0"
@@ -90,15 +105,15 @@
       "google/gemma-4-31B-it-qat-w4a16-ct"
     ],
     "requiredImages": [
-      "ghcr.io/aivillage/workshops/email-indirect-service:v0.1.0",
-      "ghcr.io/aivillage/workshops/email-indirect-user:v0.1.0",
-      "ghcr.io/aivillage/workshops/llm-embeddings:v0.1.0",
-      "ghcr.io/aivillage/workshops/prompt-extraction-service:v0.1.0",
-      "ghcr.io/aivillage/workshops/prompt-extraction-user:v0.1.0",
-      "ghcr.io/aivillage/workshops/rag-poisoning-service:v0.1.0",
-      "ghcr.io/aivillage/workshops/rag-poisoning-user:v0.1.0",
-      "ghcr.io/aivillage/workshops/yolo-l2-notebook:v0.1.0",
-      "ghcr.io/aivillage/workshops/yolo-l2-verification:v0.1.0"
+      "ghcr.io/aivillage/workshops/email-indirect-service:667af5d",
+      "ghcr.io/aivillage/workshops/email-indirect-user:667af5d",
+      "ghcr.io/aivillage/workshops/llm-embeddings:667af5d",
+      "ghcr.io/aivillage/workshops/prompt-extraction-service:667af5d",
+      "ghcr.io/aivillage/workshops/prompt-extraction-user:667af5d",
+      "ghcr.io/aivillage/workshops/rag-poisoning-service:667af5d",
+      "ghcr.io/aivillage/workshops/rag-poisoning-user:667af5d",
+      "ghcr.io/aivillage/workshops/yolo-l2-notebook:667af5d",
+      "ghcr.io/aivillage/workshops/yolo-l2-verification:667af5d"
     ]
   },
   "containers": [
