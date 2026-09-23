@@ -1,11 +1,14 @@
 name: rag-poisoning
-description: "RAG Poisoning Challenge"
+description: "Subvert an enterprise policy advisor by poisoning its retrieval-augmented knowledge base."
 model: "google/gemma-4-31B-it-qat-w4a16-ct"
 user:
-  image: "ghcr.io/aivillage/workshops/rag-poisoning-user:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/rag-poisoning-user:5714df0"
   port: 5000
   env:
     SERVICE_URL: "http://rag-poisoning-service:5000"
 service:
-  image: "ghcr.io/aivillage/workshops/rag-poisoning-service:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/rag-poisoning-service:5714df0"
   port: 5000
+  env:
+    VLLM_URL: "http://vllm-gemma3:8000/v1/chat/completions"
+    VLLM_MODEL: "gemma-3"

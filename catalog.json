@@ -5,7 +5,7 @@
       "description": "OmniCorp deployed an automated executive email assistant. Probe the agent and exfiltrate confidential corporate data.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/email-indirect-user:667af5d",
+        "image": "ghcr.io/aivillage/workshops/email-indirect-user:215bce6",
         "port": 5000,
         "extraIngressPorts": [
           25
@@ -18,7 +18,7 @@
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/email-indirect-service:667af5d",
+        "image": "ghcr.io/aivillage/workshops/email-indirect-service:215bce6",
         "port": 2525,
         "env": {
           "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
@@ -38,19 +38,31 @@
         }
       }
     },
+    "model-lab": {
+      "name": "model-lab",
+      "description": "Guided tour of how MicroGPT works.",
+      "user": {
+        "image": "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev6",
+        "port": 80,
+        "launch_uri": "/?presentation=spatial&kiosk=1",
+        "env": {
+          "PORT": "80"
+        }
+      }
+    },
     "prompt-extraction": {
       "name": "prompt-extraction",
       "description": "OmniCorp's internal AI helpdesk holds restricted credentials. Bypass its guardrails to extract the secret code.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/prompt-extraction-user:667af5d",
+        "image": "ghcr.io/aivillage/workshops/prompt-extraction-user:5714df0",
         "port": 5000,
         "env": {
           "SERVICE_URL": "http://prompt-extraction-service:5000"
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/prompt-extraction-service:667af5d",
+        "image": "ghcr.io/aivillage/workshops/prompt-extraction-service:5714df0",
         "port": 5000,
         "env": {
           "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
@@ -63,14 +75,14 @@
       "description": "Subvert an enterprise policy advisor by poisoning its retrieval-augmented knowledge base.",
       "model": "google/gemma-4-31B-it-qat-w4a16-ct",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/rag-poisoning-user:667af5d",
+        "image": "ghcr.io/aivillage/workshops/rag-poisoning-user:5714df0",
         "port": 5000,
         "env": {
           "SERVICE_URL": "http://rag-poisoning-service:5000"
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/rag-poisoning-service:667af5d",
+        "image": "ghcr.io/aivillage/workshops/rag-poisoning-service:5714df0",
         "port": 5000,
         "env": {
           "VLLM_URL": "http://vllm-gemma3:8000/v1/chat/completions",
@@ -82,7 +94,7 @@
       "name": "yolo-l2",
       "description": "Fool a real-time object detection model using imperceptible image perturbations.",
       "user": {
-        "image": "ghcr.io/aivillage/workshops/yolo-l2-notebook:667af5d",
+        "image": "ghcr.io/aivillage/workshops/yolo-l2-notebook:5714df0",
         "port": 5000,
         "env": {
           "BASE_URL": "/",
@@ -91,7 +103,7 @@
         }
       },
       "service": {
-        "image": "ghcr.io/aivillage/workshops/yolo-l2-verification:667af5d",
+        "image": "ghcr.io/aivillage/workshops/yolo-l2-verification:5714df0",
         "port": 5000,
         "env": {
           "L2_THRESHOLD": "50.0"
@@ -105,15 +117,16 @@
       "google/gemma-4-31B-it-qat-w4a16-ct"
     ],
     "requiredImages": [
-      "ghcr.io/aivillage/workshops/email-indirect-service:667af5d",
-      "ghcr.io/aivillage/workshops/email-indirect-user:667af5d",
+      "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev6",
+      "ghcr.io/aivillage/workshops/email-indirect-service:215bce6",
+      "ghcr.io/aivillage/workshops/email-indirect-user:215bce6",
       "ghcr.io/aivillage/workshops/llm-embeddings:667af5d",
-      "ghcr.io/aivillage/workshops/prompt-extraction-service:667af5d",
-      "ghcr.io/aivillage/workshops/prompt-extraction-user:667af5d",
-      "ghcr.io/aivillage/workshops/rag-poisoning-service:667af5d",
-      "ghcr.io/aivillage/workshops/rag-poisoning-user:667af5d",
-      "ghcr.io/aivillage/workshops/yolo-l2-notebook:667af5d",
-      "ghcr.io/aivillage/workshops/yolo-l2-verification:667af5d"
+      "ghcr.io/aivillage/workshops/prompt-extraction-service:5714df0",
+      "ghcr.io/aivillage/workshops/prompt-extraction-user:5714df0",
+      "ghcr.io/aivillage/workshops/rag-poisoning-service:5714df0",
+      "ghcr.io/aivillage/workshops/rag-poisoning-user:5714df0",
+      "ghcr.io/aivillage/workshops/yolo-l2-notebook:5714df0",
+      "ghcr.io/aivillage/workshops/yolo-l2-verification:5714df0"
     ]
   },
   "containers": [

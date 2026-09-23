@@ -1,8 +1,8 @@
 name: llm-embeddings
-description: "LLM Embeddings Explorer"
+description: "Interactive visualizer exploring tokenization, embedding spaces, and agent execution loops."
 model: "google/gemma-3-270m"
 user:
-  image: "ghcr.io/aivillage/workshops/llm-embeddings:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/llm-embeddings:667af5d"
   port: 8080
   env:
     PORT: "8080"

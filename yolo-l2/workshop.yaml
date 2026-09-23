@@ -1,14 +1,14 @@
 name: yolo-l2
-description: "YOLO Adversarial Challenge"
+description: "Fool a real-time object detection model using imperceptible image perturbations."
 user:
-  image: "ghcr.io/aivillage/workshops/yolo-l2-notebook:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/yolo-l2-notebook:5714df0"
   port: 5000
   env:
-    BASE_URL: "/workshop/yolo-l2"
+    BASE_URL: "/"
     VERIFICATION_SERVER_UNTARGETED: "http://yolo-l2-verification:5000/verify"
     VERIFICATION_SERVER_TARGETED: "http://yolo-l2-target-verification:5000/verify"
 service:
-  image: "ghcr.io/aivillage/workshops/yolo-l2-verification:v0.1.0"
+  image: "ghcr.io/aivillage/workshops/yolo-l2-verification:5714df0"
   port: 5000
   env:
     L2_THRESHOLD: "50.0"
