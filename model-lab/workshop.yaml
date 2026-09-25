@@ -1,7 +1,7 @@
 name: model-lab
 description: "Guided tour of how MicroGPT works."
 user:
-  image: "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev7"
+  image: "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev9"
   port: 80
   launch_uri: "/?presentation=spatial&kiosk=1"
   env:
