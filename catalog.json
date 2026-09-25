@@ -42,7 +42,7 @@
       "name": "model-lab",
       "description": "Guided tour of how MicroGPT works.",
       "user": {
-        "image": "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev6",
+        "image": "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev7",
         "port": 80,
         "launch_uri": "/?presentation=spatial&kiosk=1",
         "env": {
@@ -117,7 +117,7 @@
       "google/gemma-4-31B-it-qat-w4a16-ct"
     ],
     "requiredImages": [
-      "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev6",
+      "ghcr.io/a-t-s-k/model-lab:bsides-abq-2026-dev7",
       "ghcr.io/aivillage/workshops/email-indirect-service:215bce6",
       "ghcr.io/aivillage/workshops/email-indirect-user:215bce6",
       "ghcr.io/aivillage/workshops/llm-embeddings:667af5d",
