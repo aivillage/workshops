@@ -5,13 +5,7 @@ TARGET="${1:-}"
 CONTEXT="${2:-}"
 shift 2 || true
 
-PROJECT_ROOT="${PROJECT_ROOT:-$(
-  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/../catalog.json" ]]; then
-    cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
-  else
-    pwd
-  fi
-)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PUSH=false
 TAG=""
 
@@ -83,11 +77,23 @@ build_one() {
 
 if [[ "$TARGET" == "--all" ]]; then
   echo "=== Building all container images ==="
-  while read -r c_name c_path; do
-    if [[ -n "$c_name" && -n "$c_path" ]]; then
-      build_one "$c_name" "$c_path"
+  for dir in "$PROJECT_ROOT"/*; do
+    if [[ -d "$dir" ]]; then
+      base_dir=$(basename "$dir")
+      case "$base_dir" in
+        .*|_|scripts|build|dist|node_modules|result) continue ;;
+      esac
+      if [[ -f "$dir/Dockerfile" ]]; then
+        build_one "$base_dir" "$base_dir"
+      fi
+      for subdir in "$dir"/*; do
+        if [[ -d "$subdir" && -f "$subdir/Dockerfile" ]]; then
+          sub_name=$(basename "$subdir")
+          build_one "${base_dir}-${sub_name}" "${base_dir}/${sub_name}"
+        fi
+      done
     fi
-  done < <(python3 -c "import json; [print(c['name'], c['path']) for c in json.load(open('$PROJECT_ROOT/catalog.json'))['containers']]")
+  done
   echo "=== Finished building all images ==="
 else
   if [[ -z "$TARGET" || -z "$CONTEXT" ]]; then

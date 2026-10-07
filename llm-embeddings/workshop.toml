@@ -1,0 +1,12 @@
+name = "llm-embeddings"
+description = "Interactive visualizer exploring tokenization, embedding spaces, and agent execution loops."
+
+[user]
+# NOTE: Explicit pinned image tag is required here because this container
+# bakes in google/gemma-3-270m weights and requires a manual local build/push
+# with an authorized Hugging Face token. Do not remove the tag.
+image = "ghcr.io/aivillage/workshops/llm-embeddings:667af5d"
+port = 8080
+
+[user.env]
+PORT = "8080"

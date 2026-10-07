@@ -8,7 +8,76 @@
   outputs =
     { self, nixpkgs, ... }:
     let
-      catalog = builtins.fromJSON (builtins.readFile ./catalog.json);
+      lib = nixpkgs.lib;
+      ignoredNames = [
+        "scripts"
+        "build"
+        "dist"
+        "node_modules"
+        "result"
+      ];
+
+      candidateDirs = lib.filterAttrs (
+        name: type:
+        type == "directory"
+        && !(lib.hasPrefix "." name)
+        && !(lib.hasPrefix "_" name)
+        && !(builtins.elem name ignoredNames)
+      ) (builtins.readDir ./.);
+
+      workshopDirs = lib.filterAttrs (
+        name: _: builtins.pathExists (./. + "/${name}/workshop.toml")
+      ) candidateDirs;
+
+      workshops = lib.mapAttrs' (
+        name: _:
+        let
+          data = builtins.fromTOML (builtins.readFile (./. + "/${name}/workshop.toml"));
+        in
+        lib.nameValuePair data.name data
+      ) workshopDirs;
+
+      workshopList = builtins.attrValues workshops;
+
+      requiredModels = lib.naturalSort (lib.unique (lib.filter (m: m != null && m != "") (
+        map (w: w.model or null) workshopList
+      )));
+
+      requiredImages = lib.naturalSort (lib.unique (lib.concatMap (
+        w:
+        (lib.optional (w ? user && w.user ? image && w.user.image != "") w.user.image)
+        ++ (lib.optional (w ? service && w.service ? image && w.service.image != "") w.service.image)
+      ) workshopList));
+
+      workshopInfo = {
+        inherit requiredModels requiredImages;
+      };
+
+      findContainers =
+        dir:
+        let
+          root = lib.optional (builtins.pathExists (./. + "/${dir}/Dockerfile")) {
+            name = dir;
+            path = dir;
+          };
+          subDirs = lib.filterAttrs (
+            subName: subType:
+            subType == "directory"
+            && !(lib.hasPrefix "." subName)
+            && !(lib.hasPrefix "_" subName)
+            && builtins.pathExists (./. + "/${dir}/${subName}/Dockerfile")
+          ) (builtins.readDir (./. + "/${dir}"));
+          subs = lib.mapAttrsToList (subName: _: {
+            name = "${dir}-${subName}";
+            path = "${dir}/${subName}";
+          }) subDirs;
+        in
+        root ++ subs;
+
+      containers = lib.sort (a: b: a.name < b.name) (
+        lib.concatLists (map findContainers (builtins.attrNames candidateDirs))
+      );
+
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -18,8 +87,7 @@
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
-      workshops = catalog.workshops;
-      workshopInfo = catalog.workshopInfo;
+      inherit workshops workshopInfo containers;
 
       packages = forAllSystems (
         system:
@@ -32,27 +100,18 @@
               exec ${./scripts/build_container.sh} "${c.name}" "${c.path}" "$@"
             '';
 
-          buildScripts = map mkBuildScript catalog.containers;
-
-          buildAllScript = pkgs.writeShellScriptBin "build-all-images" ''
+          buildAll = pkgs.writeShellScriptBin "build-all-images" ''
             exec ${./scripts/build_container.sh} --all "" "$@"
           '';
-
-          allPackages = buildScripts ++ [ buildAllScript ];
         in
-        builtins.listToAttrs (map (p: { name = p.name; value = p; }) allPackages)
+        (builtins.listToAttrs (map (c: lib.nameValuePair "build-${c.name}" (mkBuildScript c)) containers))
+        // { build-all-images = buildAll; }
       );
 
       devShells = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-
-          pythonEnv = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
-          compileCatalog = pkgs.writeShellScriptBin "compile-catalog" ''
-            exec ${pythonEnv}/bin/python scripts/compile_catalog.py "$@"
-          '';
-
           pkgsForSystem = self.packages.${system};
         in
         {
@@ -62,48 +121,28 @@
               [
                 docker
                 curl
-                talosctl
-                kubectl
-                kubernetes-helm
-                tilt
-                openssl
-                zsh
-                k9s
-                cilium-cli
-                hubble
-                pythonEnv
-                compileCatalog
+                jq
               ]
               ++ (builtins.attrValues pkgsForSystem);
 
-            # ShellHook will now automatically use your .envrc variables to log in
             shellHook = ''
-              export KUBECONFIG="$(pwd)/.talos/kubeconfig"
-              echo "📦 Container Build Shell Initialized"
-              echo "------------------------------------"
+              echo "Workshop Container Build Shell Initialized"
+              echo "------------------------------------------"
 
-              # Auto-login to GHCR
               if [[ -n "''${GHCR_PAT:-}" && -n "''${GITHUB_USERNAME:-}" ]]; then
-                echo "🔑 Authenticating with GHCR as ''${GITHUB_USERNAME}..."
+                echo "Authenticating with GHCR as ''${GITHUB_USERNAME}..."
                 echo "''${GHCR_PAT}" | docker login ghcr.io -u "''${GITHUB_USERNAME}" --password-stdin >/dev/null 2>&1
-                echo "   ✅ GHCR Login successful."
-              else
-                echo "   ⚠️ GHCR credentials missing in .envrc"
+                echo "  GHCR authentication successful."
+              elif [[ -n "''${GHCR_PAT:-}" ]]; then
+                echo "Authenticating with GHCR..."
+                echo "''${GHCR_PAT}" | docker login ghcr.io -u "USER" --password-stdin >/dev/null 2>&1
+                echo "  GHCR authentication successful."
               fi
 
-              # Auto-login to Docker Hub
-              if [[ -n "''${DH_PAT:-}" && -n "''${DH_UNAME:-}" ]]; then
-                echo "🔑 Authenticating with Docker Hub as ''${DH_UNAME}..."
-                echo "''${DH_PAT}" | docker login -u "''${DH_UNAME}" --password-stdin >/dev/null 2>&1
-                echo "   ✅ Docker Hub Login successful."
-              else
-                echo "   ⚠️ Docker Hub credentials missing in .envrc"
-              fi
-              echo "------------------------------------"
-              echo "Available commands:"
-              echo "  compile-catalog [--check]"
+              echo "------------------------------------------"
+              echo "Available build commands:"
               echo "  build-all-images [--push] [--tag <tag>]"
-              ${builtins.concatStringsSep "\n" (map (c: "echo \"  build-${c.name} [--push] [--tag <tag>]\"") catalog.containers)}
+              ${builtins.concatStringsSep "\n" (map (c: "echo \"  build-${c.name} [--push] [--tag <tag>]\"") containers)}
             '';
           };
         }
