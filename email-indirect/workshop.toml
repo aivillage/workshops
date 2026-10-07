@@ -3,7 +3,7 @@ description = "OmniCorp deployed an automated executive email assistant. Probe t
 model = "google/gemma-4-31B-it-qat-w4a16-ct"
 
 [user]
-image = "ghcr.io/aivillage/workshops/email-indirect-user:215bce6"
+image = "ghcr.io/aivillage/workshops/email-indirect-user"
 port = 5000
 extraIngressPorts = [25]
 
@@ -14,7 +14,7 @@ MY_LISTEN_PORT = 25
 WEB_PORT = 5000
 
 [service]
-image = "ghcr.io/aivillage/workshops/email-indirect-service:215bce6"
+image = "ghcr.io/aivillage/workshops/email-indirect-service"
 port = 2525
 
 [service.env]
