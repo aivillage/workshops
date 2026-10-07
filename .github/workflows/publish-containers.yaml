@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      - 'feat/**'
+      - 'fix/**'
       - 'refactor/**'
     tags:
       - 'v*'

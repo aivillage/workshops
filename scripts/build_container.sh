@@ -5,7 +5,7 @@ TARGET="${1:-}"
 CONTEXT="${2:-}"
 shift 2 || true
 
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+PROJECT_ROOT="${PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 PUSH=false
 TAG=""
 
@@ -32,10 +32,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAG" ]]; then
-  if GIT_SHA=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null); then
-    TAG="$GIT_SHA"
-  else
-    TAG="latest"
+  TAG="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+  if [[ -z "$TAG" ]]; then
+    echo "Error: Unable to determine git commit SHA for image tag. Pass --tag <tag>." >&2
+    exit 1
   fi
 fi
 
@@ -55,11 +55,11 @@ build_one() {
   local image="ghcr.io/aivillage/workshops/${name}"
   local full_tag="${image}:${TAG}"
 
-  echo "=== 🔨 Building ${name} (Tag: ${TAG}) ==="
+  echo "=== Building ${name} (Tag: ${TAG}) ==="
   "$CONTAINER_CMD" build --platform linux/amd64 -t "${full_tag}" "${PROJECT_ROOT}/${path}"
 
   if [[ "$PUSH" == "true" ]]; then
-    echo "=== 🚀 Pushing ${full_tag} ==="
+    echo "=== Pushing ${full_tag} ==="
     "$CONTAINER_CMD" push "${full_tag}"
 
     local current_branch
