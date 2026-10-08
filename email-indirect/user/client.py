@@ -1098,8 +1098,8 @@ def send_email():
     except Exception as e:
         print(f"[Client] Error sending email: {e}")
         if is_ajax:
-            return jsonify({"success": False, "error": str(e)}), 500
-        return f"Error sending email: {e}", 500
+            return jsonify({"success": False, "error": "Failed to send email. Check server logs for details."}), 500
+        return "Failed to send email. Please try again later.", 500
 
 
 if __name__ == "__main__":
