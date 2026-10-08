@@ -3,3 +3,6 @@
 .direnv
 .direnv/*
 .talos
+__pycache__/
+*.py[cod]
+*$py.class

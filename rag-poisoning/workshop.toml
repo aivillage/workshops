@@ -1,0 +1,18 @@
+name = "rag-poisoning"
+description = "Subvert an enterprise policy advisor by poisoning its retrieval-augmented knowledge base."
+model = "google/gemma-4-31B-it-qat-w4a16-ct"
+
+[user]
+image = "ghcr.io/aivillage/workshops/rag-poisoning-user"
+port = 5000
+
+[user.env]
+SERVICE_URL = "http://rag-poisoning-service:5000"
+
+[service]
+image = "ghcr.io/aivillage/workshops/rag-poisoning-service"
+port = 5000
+
+[service.env]
+VLLM_URL = "http://vllm-gemma3:8000/v1/chat/completions"
+VLLM_MODEL = "gemma-3"
